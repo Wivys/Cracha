@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface VliAvatarProps {
   fotoUrl?: string | null;
@@ -20,6 +20,18 @@ export const VliAvatar: React.FC<VliAvatarProps> = ({
   const [imageError, setImageError] = useState(false);
   const [svgAssetError, setSvgAssetError] = useState(false);
 
+  const isFemale = genero === 'M';
+  const avatarSvgPath = isFemale ? '/avatar_m.svg' : '/avatar_h.svg';
+
+  // Redefine erros caso o usuário altere a foto ou troque o gênero
+  useEffect(() => {
+    setImageError(false);
+  }, [fotoUrl]);
+
+  useEffect(() => {
+    setSvgAssetError(false);
+  }, [avatarSvgPath]);
+
   const sizeClasses = {
     sm: 'w-10 h-10 rounded-xl',
     md: 'w-16 h-16 rounded-2xl',
@@ -28,9 +40,7 @@ export const VliAvatar: React.FC<VliAvatarProps> = ({
     badge: 'w-28 h-28 sm:w-32 sm:h-32 rounded-2xl',
   }[size];
 
-  const hasValidPhoto = fotoUrl && !imageError;
-  const isFemale = genero === 'M';
-  const avatarSvgPath = isFemale ? '/avatar_m.svg' : '/avatar_h.svg';
+  const hasValidPhoto = Boolean(fotoUrl) && !imageError;
 
   return (
     <div
@@ -40,14 +50,14 @@ export const VliAvatar: React.FC<VliAvatarProps> = ({
     >
       {hasValidPhoto ? (
         <img
-          src={fotoUrl}
+          src={fotoUrl!}
           alt={`Foto de ${nome}`}
           referrerPolicy="no-referrer"
           onError={() => setImageError(true)}
           className="w-full h-full object-cover object-center"
         />
       ) : (
-        /* VLI Worker Avatar (Mulher M ou Homem H) com capacete VLi e uniforme */
+        /* VLI Worker Avatar (Mulher M ou Homem H) com renderização em pixel art */
         <div
           className="w-full h-full flex items-center justify-center relative bg-gradient-to-b from-slate-100 to-slate-200 select-none"
           title={`Avatar Colaborador VLI (${isFemale ? 'Mulher - M' : 'Homem - H'})`}
@@ -56,7 +66,7 @@ export const VliAvatar: React.FC<VliAvatarProps> = ({
             <img
               key={avatarSvgPath}
               src={avatarSvgPath}
-              alt={`Avatar Colaborador VLI 8-bit (${isFemale ? 'Mulher' : 'Homem'})`}
+              alt={`Avatar Colaborador VLI (${isFemale ? 'Mulher' : 'Homem'})`}
               onError={() => setSvgAssetError(true)}
               className="w-full h-full object-contain [image-rendering:pixelated]"
               style={{ imageRendering: 'pixelated' }}
@@ -107,10 +117,6 @@ export const VliAvatar: React.FC<VliAvatarProps> = ({
               <path d="M72 100 Q120 85 168 100 Q152 114 120 112 Q88 114 72 100 Z" fill="#FFFFFF" stroke="#CBD5E1" strokeWidth="1" />
             </svg>
           )}
-          {/* VLI Gender Watermark Pill */}
-          <span className="absolute bottom-1 right-1 bg-[#002B49] text-[#FFB81C] text-[9px] font-black px-1.5 py-0.5 rounded-full border border-[#FF7A00] shadow-xs">
-            {isFemale ? 'VLi • M' : 'VLi • H'}
-          </span>
         </div>
       )}
     </div>

@@ -10,16 +10,11 @@ import {
   GraduationCap,
   Link as LinkIcon,
   Download,
-  Check,
-  Building2,
-  Calendar,
-  Sparkles,
   Infinity,
 } from 'lucide-react';
 import {
   FuncionarioWithTreinamentos,
-  CURSOS_PREDEFINIDOS,
-  Treinamento,
+  TrainingItem,
   WebtrainingParsedData,
 } from '../types';
 import { dbService } from '../lib/supabase';
@@ -31,19 +26,6 @@ interface CadastroPageProps {
   onSuccess: (savedEmployee: FuncionarioWithTreinamentos) => void;
   onCancel: () => void;
   onGoToGallery?: () => void;
-}
-
-interface TrainingItem {
-  id: string;
-  nome_curso: string;
-  data_validade: string;
-  status: 'valido' | 'vencido';
-  carga_horaria?: string;
-  origem?: 'manual' | 'universidade_vli';
-  categoria?: string;
-  vencimento_treinamento?: string;
-  vencimento_aso?: string;
-  status_webtraining?: string;
 }
 
 /**

@@ -33,6 +33,8 @@ export interface Treinamento {
   status_webtraining?: string; // ex: 'Liberado'
 }
 
+export type TrainingItem = Omit<Treinamento, 'funcionario_id'>;
+
 export interface WebtrainingParsedCourse {
   nome_curso: string;
   categoria: string;
