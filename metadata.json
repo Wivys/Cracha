@@ -1,0 +1,6 @@
+{
+  "name": "VLI Crachá & Treinamentos",
+  "description": "Plataforma de gestão e visualização de crachás digitais e treinamentos de funcionários VLI",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

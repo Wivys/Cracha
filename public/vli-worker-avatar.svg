@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="100%" height="100%">
+  <!-- Background Circle with subtle industrial gradient -->
+  <defs>
+    <linearGradient id="vliBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E2E8F0" />
+      <stop offset="100%" stop-color="#CBD5E1" />
+    </linearGradient>
+    <linearGradient id="vliNavy" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0B2545" />
+      <stop offset="100%" stop-color="#001833" />
+    </linearGradient>
+    <linearGradient id="vliYellow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FFB81C" />
+      <stop offset="100%" stop-color="#F5A800" />
+    </linearGradient>
+    <linearGradient id="skinGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FCD3B0" />
+      <stop offset="100%" stop-color="#F6B889" />
+    </linearGradient>
+    <linearGradient id="vestOrange" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFB81C" />
+      <stop offset="100%" stop-color="#E69500" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background Base -->
+  <rect width="240" height="240" rx="40" fill="url(#vliBg)"/>
+  
+  <!-- Subtle inner ring -->
+  <circle cx="120" cy="120" r="108" fill="#F1F5F9" stroke="#94A3B8" stroke-width="1.5" stroke-dasharray="4 3"/>
+
+  <!-- Neck -->
+  <path d="M102 142 L138 142 L138 168 C138 174 132 178 120 178 C108 178 102 174 102 168 Z" fill="#E89F70" />
+
+  <!-- VLi Uniform / Farda (Navy + Yellow accents + high-vis stripe) -->
+  <path d="M48 240 C52 195 80 162 104 158 L120 174 L136 158 C160 162 188 195 192 240 Z" fill="url(#vliNavy)" />
+  
+  <!-- Uniform Collar -->
+  <path d="M102 158 L120 182 L138 158" fill="none" stroke="#FFB81C" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- High-Vis Reflective Band on Uniform -->
+  <path d="M60 216 Q120 205 180 216" stroke="#FFB81C" stroke-width="7" fill="none" stroke-linecap="round"/>
+  <path d="M60 216 Q120 205 180 216" stroke="#FFFFFF" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.85"/>
+
+  <!-- VLI Chest Badge on Uniform -->
+  <rect x="74" y="184" width="30" height="12" rx="2" fill="#001833" stroke="#FFB81C" stroke-width="1"/>
+  <text x="89" y="193" font-family="'Space Mono', monospace, sans-serif" font-size="7.5" font-weight="900" fill="#FFB81C" text-anchor="middle" letter-spacing="0.5">VLI</text>
+
+  <!-- Human Face -->
+  <ellipse cx="120" cy="116" rx="38" ry="42" fill="url(#skinGrad)" />
+
+  <!-- Ears -->
+  <ellipse cx="80" cy="120" rx="7" ry="11" fill="#F6B889" />
+  <ellipse cx="160" cy="120" rx="7" ry="11" fill="#F6B889" />
+
+  <!-- Hair under cap sides -->
+  <path d="M82 108 C80 125 84 135 88 138" stroke="#33221A" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M158 108 C160 125 156 135 152 138" stroke="#33221A" stroke-width="4" fill="none" stroke-linecap="round"/>
+
+  <!-- Eyes & Eyebrows -->
+  <path d="M98 108 Q106 105 112 108" stroke="#33221A" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <path d="M128 108 Q134 105 142 108" stroke="#33221A" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  <circle cx="106" cy="118" r="3.8" fill="#1E293B" />
+  <circle cx="107.5" cy="116.5" r="1.2" fill="#FFFFFF" />
+  <circle cx="134" cy="118" r="3.8" fill="#1E293B" />
+  <circle cx="135.5" cy="116.5" r="1.2" fill="#FFFFFF" />
+
+  <!-- Nose -->
+  <path d="M120 118 L117 127 L123 127" stroke="#D78A58" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Friendly Smile -->
+  <path d="M109 135 Q120 144 131 135" stroke="#7A3919" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+
+  <!-- Official VLI Baseball Cap / Boné VLi -->
+  <!-- Cap Crown / Dome -->
+  <path d="M78 100 C78 60 162 60 162 100 C154 94 86 94 78 100 Z" fill="url(#vliNavy)" stroke="#001833" stroke-width="1.5"/>
+  
+  <!-- Cap Panel Seam & Button -->
+  <path d="M120 62 L120 95" stroke="#163866" stroke-width="1.5" stroke-linecap="round"/>
+  <circle cx="120" cy="63" r="3.5" fill="#FFB81C" />
+
+  <!-- Cap Front Logo (VLI) -->
+  <g transform="translate(120, 83)">
+    <rect x="-20" y="-8.5" width="40" height="15" rx="3" fill="#00162B" stroke="#FFB81C" stroke-width="1"/>
+    <text x="0" y="3" font-family="'Space Mono', sans-serif" font-size="10.5" font-weight="900" fill="#FFB81C" text-anchor="middle" letter-spacing="1">VLI</text>
+  </g>
+
+  <!-- Cap Visor / Aba do Boné (Navy with Yellow Trim) -->
+  <path d="M72 100 Q120 85 168 100 Q152 114 120 112 Q88 114 72 100 Z" fill="url(#vliNavy)" />
+  <path d="M72 100 Q120 85 168 100" stroke="#FFB81C" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <!-- Visor lower lip shadow -->
+  <path d="M78 103 Q120 114 162 103" stroke="#001224" stroke-width="2" fill="none"/>
+</svg>
