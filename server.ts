@@ -231,6 +231,14 @@ async function startServer() {
     return res.json({ success: true, data: cursos });
   });
 
+  app.delete('/api/catalogo-cursos/:nome', (req, res) => {
+    const target = decodeURIComponent(req.params.nome || '').trim().toLowerCase();
+    const cursos = readCatalogoCursos();
+    const filtered = cursos.filter((c) => c.trim().toLowerCase() !== target);
+    writeCatalogoCursos(filtered);
+    return res.json({ success: true, data: filtered });
+  });
+
   // 7. Rota para extração de dados do link do crachá da Universidade VLI (Webtraining)
   app.post('/api/extract-webtraining', async (req, res) => {
     try {

@@ -23,6 +23,7 @@ export const getSupabaseConfig = () => {
 };
 
 export const setSupabaseConfig = (url: string, key: string) => {
+  clientInstance = null;
   if (url && key) {
     localStorage.setItem('vli_supabase_url', url.trim());
     localStorage.setItem('vli_supabase_anon_key', key.trim());
@@ -183,6 +184,47 @@ export const saveLocalStore = (data: FuncionarioWithTreinamentos[]) => {
     console.error('Erro ao salvar colaboradores locais:', e);
   }
 };
+
+/**
+ * Formata datas com segurança para o tipo DATE do Postgres / Supabase
+ * Converte DD/MM/AAAA para YYYY-MM-DD e valores infinitos/indeterminados para '2099-12-31'
+ */
+export function toSafeDateForSupabase(dateStr?: string | null): string {
+  if (!dateStr || typeof dateStr !== 'string') return '2099-12-31';
+  const clean = dateStr.trim();
+  const lower = clean.toLowerCase();
+  if (
+    lower === '' ||
+    lower.includes('indeterminado') ||
+    lower.includes('permanente') ||
+    lower.includes('infinito') ||
+    lower.includes('sem exp') ||
+    lower.includes('∞')
+  ) {
+    return '2099-12-31';
+  }
+
+  // DD/MM/YYYY
+  const brMatch = clean.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (brMatch) {
+    const day = brMatch[1].padStart(2, '0');
+    const month = brMatch[2].padStart(2, '0');
+    const year = brMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  // YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    return clean;
+  }
+
+  const parsed = new Date(clean);
+  if (!isNaN(parsed.getTime())) {
+    return parsed.toISOString().split('T')[0];
+  }
+
+  return '2099-12-31';
+}
 
 /**
  * Serviço de Banco de Dados e Autenticação VLI
@@ -393,10 +435,11 @@ export const dbService = {
 
   /**
    * Busca todos os colaboradores cadastrados
-   * - Consulta o servidor Express /api/colaboradores para sincronização entre dispositivos
-   * - Fallback para Supabase ou cache local do navegador
+   * - Consulta Supabase, Servidor Express (/api/colaboradores) e Local Storage
+   * - Une todas as fontes garantindo que nenhum crachá seja perdido
    */
   async getFuncionarios(): Promise<FuncionarioWithTreinamentos[]> {
+    let supabaseList: FuncionarioWithTreinamentos[] = [];
     const supabase = getSupabase();
     if (supabase) {
       try {
@@ -405,29 +448,24 @@ export const dbService = {
           .select('*')
           .order('created_at', { ascending: false });
 
-        if (funcError) throw funcError;
+        if (!funcError && Array.isArray(funcData) && funcData.length > 0) {
+          const { data: trainData } = await supabase
+            .from('treinamentos')
+            .select('*');
 
-        const { data: trainData, error: trainError } = await supabase
-          .from('treinamentos')
-          .select('*');
-
-        if (trainError) throw trainError;
-
-        const combined: FuncionarioWithTreinamentos[] = (funcData || []).map((f: Funcionario) =>
-          repairFuncionarioObject({
-            ...f,
-            treinamentos: (trainData || []).filter((t: Treinamento) => t.funcionario_id === f.id),
-          })
-        );
-
-        saveLocalStore(combined);
-        return combined;
+          supabaseList = funcData.map((f: Funcionario) =>
+            repairFuncionarioObject({
+              ...f,
+              treinamentos: (trainData || []).filter((t: Treinamento) => t.funcionario_id === f.id),
+            })
+          );
+        }
       } catch (err) {
-        console.warn('Aviso: Utilizando armazenamento local para colaboradores:', err);
+        console.warn('Aviso: Utilizando busca híbrida para colaboradores:', err);
       }
     }
 
-    // Tentar carregar do servidor Express (acessível por qualquer dispositivo móvel na rede)
+    // Carregar do servidor Express (acessível por outros dispositivos na rede)
     let serverList: FuncionarioWithTreinamentos[] = [];
     try {
       const res = await fetch('/api/colaboradores');
@@ -441,7 +479,7 @@ export const dbService = {
 
     const localList = loadLocalStore();
 
-    // Mescla dados do servidor com locais preservando todas as criações sem perda de campos
+    // Mescla dados de todas as fontes preservando o crachá mais completo e recente
     const mergedMap = new Map<string, FuncionarioWithTreinamentos>();
 
     const getItemKey = (c: any, index: number) => {
@@ -451,15 +489,13 @@ export const dbService = {
       return mat || id || `item-${index}`;
     };
 
-    // 1. Coloca dados locais do navegador (mais recentes para o usuário ativo)
-    localList.forEach((c, idx) => {
+    // 1. Supabase (nuvem)
+    supabaseList.forEach((c, idx) => {
       const key = getItemKey(c, idx);
-      if (key) {
-        mergedMap.set(key, repairFuncionarioObject(c));
-      }
+      if (key) mergedMap.set(key, repairFuncionarioObject(c));
     });
 
-    // 2. Mescla com dados do servidor Express
+    // 2. Servidor Express
     serverList.forEach((c, idx) => {
       const key = getItemKey(c, idx);
       if (key) {
@@ -479,9 +515,28 @@ export const dbService = {
       }
     });
 
+    // 3. Local Storage (gravação do navegador ativo)
+    localList.forEach((c, idx) => {
+      const key = getItemKey(c, idx);
+      if (key) {
+        if (!mergedMap.has(key)) {
+          mergedMap.set(key, repairFuncionarioObject(c));
+        } else {
+          const existing = mergedMap.get(key)!;
+          const trainExisting = Array.isArray(existing.treinamentos) ? existing.treinamentos : [];
+          const trainNew = Array.isArray(c.treinamentos) ? c.treinamentos : [];
+          mergedMap.set(key, repairFuncionarioObject({
+            ...existing,
+            ...c,
+            foto_url: c.foto_url || existing.foto_url || null,
+            treinamentos: (trainNew.length >= trainExisting.length ? trainNew : trainExisting).map(repairCourseObject),
+          }));
+        }
+      }
+    });
+
     const merged = Array.from(mergedMap.values());
 
-    // Se houver dados locais/mesclados que ainda não estão no servidor, sincroniza-os em segundo plano
     if (merged.length > 0) {
       saveLocalStore(merged);
       try {
@@ -568,207 +623,10 @@ export const dbService = {
   },
 
   /**
-   * Cria um novo colaborador com seus treinamentos
-   */
-  async createFuncionario(
-    funcionario: Omit<Funcionario, 'id' | 'created_at'>,
-    treinamentos: Omit<Treinamento, 'id' | 'funcionario_id'>[]
-  ): Promise<FuncionarioWithTreinamentos> {
-    const supabase = getSupabase();
-    const generatedId = `vli-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
-    const nowIso = new Date().toISOString();
-
-    if (supabase) {
-      try {
-        const { data: insertedFunc, error: insertError } = await supabase
-          .from('funcionarios')
-          .insert({
-            nome: funcionario.nome,
-            matricula: funcionario.matricula,
-            foto_url: funcionario.foto_url,
-            cargo: funcionario.cargo || 'Operador Ferroviário / Logística',
-            unidade: funcionario.unidade || 'Malha Operacional VLI',
-            genero: funcionario.genero || 'H',
-          })
-          .select()
-          .single();
-
-        if (insertError) throw insertError;
-
-        let insertedTrainings: Treinamento[] = [];
-        if (treinamentos.length > 0) {
-          const payload = treinamentos.map((t) => ({
-            funcionario_id: insertedFunc.id,
-            nome_curso: t.nome_curso,
-            data_validade: t.data_validade,
-            status: t.status,
-            carga_horaria: t.carga_horaria || '20h',
-          }));
-
-          const { data: tData, error: tError } = await supabase
-            .from('treinamentos')
-            .insert(payload)
-            .select();
-
-          if (tError) throw tError;
-          insertedTrainings = tData || [];
-        }
-
-        const complete: FuncionarioWithTreinamentos = {
-          ...insertedFunc,
-          treinamentos: insertedTrainings,
-        };
-
-        const list = loadLocalStore();
-        saveLocalStore([complete, ...list]);
-        try {
-          fetch('/api/colaboradores', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(complete),
-          }).catch(() => {});
-        } catch {}
-        return complete;
-      } catch (err) {
-        console.warn('Erro ao inserir no Supabase, salvando localmente:', err);
-      }
-    }
-
-    // Armazenamento local
-    const newRecord: FuncionarioWithTreinamentos = {
-      id: generatedId,
-      nome: funcionario.nome,
-      matricula: funcionario.matricula,
-      foto_url: funcionario.foto_url,
-      cargo: funcionario.cargo || 'Operador Ferroviário / Logística',
-      unidade: funcionario.unidade || 'Corredor Centro-Leste VLI',
-      genero: funcionario.genero || 'H',
-      created_at: nowIso,
-      treinamentos: treinamentos.map((t, idx) => ({
-        id: `trn-${Date.now()}-${idx}`,
-        funcionario_id: generatedId,
-        nome_curso: t.nome_curso,
-        data_validade: t.data_validade,
-        status: t.status,
-        carga_horaria: t.carga_horaria || '20h',
-        origem: t.origem || 'manual',
-        categoria: t.categoria,
-        vencimento_treinamento: t.vencimento_treinamento,
-        vencimento_aso: t.vencimento_aso,
-        status_webtraining: t.status_webtraining,
-      })),
-    };
-
-    const current = loadLocalStore();
-    const updated = [newRecord, ...current];
-    saveLocalStore(updated);
-
-    // Persistir no servidor Express para acesso via QR Code em qualquer dispositivo
-    try {
-      fetch('/api/colaboradores', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newRecord),
-      }).catch(() => {});
-    } catch {}
-
-    return newRecord;
-  },
-
-  /**
-   * Atualiza dados de um colaborador e substitui seus treinamentos
-   */
-  async updateFuncionario(
-    id: string,
-    funcionario: Partial<Funcionario>,
-    treinamentos?: Treinamento[]
-  ): Promise<FuncionarioWithTreinamentos | null> {
-    const supabase = getSupabase();
-
-    if (supabase) {
-      try {
-        const { data: updatedFunc, error: uError } = await supabase
-          .from('funcionarios')
-          .update({
-            nome: funcionario.nome,
-            matricula: funcionario.matricula,
-            foto_url: funcionario.foto_url,
-            cargo: funcionario.cargo,
-            unidade: funcionario.unidade,
-            genero: funcionario.genero,
-          })
-          .eq('id', id)
-          .select()
-          .single();
-
-        if (uError) throw uError;
-
-        if (treinamentos) {
-          await supabase.from('treinamentos').delete().eq('funcionario_id', id);
-
-          if (treinamentos.length > 0) {
-            const payload = treinamentos.map((t) => ({
-              funcionario_id: id,
-              nome_curso: t.nome_curso,
-              data_validade: t.data_validade,
-              status: t.status,
-              carga_horaria: t.carga_horaria || '20h',
-            }));
-            await supabase.from('treinamentos').insert(payload);
-          }
-        }
-
-        const complete: FuncionarioWithTreinamentos = {
-          ...updatedFunc,
-          treinamentos: treinamentos || [],
-        };
-
-        const current = loadLocalStore();
-        const updated = current.map((item) => (item.id === id ? complete : item));
-        saveLocalStore(updated);
-
-        try {
-          fetch('/api/colaboradores', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(complete),
-          }).catch(() => {});
-        } catch {}
-
-        return complete;
-      } catch (err) {
-        console.warn('Erro ao atualizar no Supabase, atualizando localmente:', err);
-      }
-    }
-
-    const current = loadLocalStore();
-    const index = current.findIndex((item) => item.id === id);
-    if (index === -1) return null;
-
-    const existing = current[index];
-    const updated: FuncionarioWithTreinamentos = {
-      ...existing,
-      ...funcionario,
-      treinamentos: treinamentos !== undefined ? treinamentos : existing.treinamentos,
-    };
-
-    current[index] = updated;
-    saveLocalStore(current);
-
-    // Persistir atualização no servidor Express
-    try {
-      fetch('/api/colaboradores', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated),
-      }).catch(() => {});
-    } catch {}
-
-    return updated;
-  },
-
-  /**
    * Salva ou atualiza colaborador de forma unificada
+   * - Persiste no Supabase (se configurado) tratando conflitos de matrícula, id e schema
+   * - Garante persistência instantânea no Local Storage do navegador
+   * - Persiste no servidor Express (/api/colaboradores) para sincronização e acesso via QR Code
    */
   async saveFuncionarioComplete(data: {
     id?: string;
@@ -790,45 +648,200 @@ export const dbService = {
       status_webtraining?: string;
     }>;
   }): Promise<FuncionarioWithTreinamentos> {
-    if (data.id) {
-      const updated = await this.updateFuncionario(
-        data.id,
-        {
-          nome: data.nome,
-          matricula: data.matricula,
-          cargo: data.cargo,
-          unidade: data.unidade,
-          foto_url: data.foto_url,
+    const supabase = getSupabase();
+    const cleanMatricula = (data.matricula || '').trim();
+    const nowIso = new Date().toISOString();
+
+    // 1. Tentar salvar/atualizar no Supabase
+    let supabaseFuncId: string | null = null;
+    if (supabase) {
+      try {
+        // Verifica se já existe colaborador com mesma matrícula ou ID
+        let queryBuilder = supabase.from('funcionarios').select('id, matricula');
+        if (data.id && cleanMatricula) {
+          queryBuilder = queryBuilder.or(`id.eq.${data.id},matricula.ilike.${cleanMatricula}`);
+        } else if (cleanMatricula) {
+          queryBuilder = queryBuilder.ilike('matricula', cleanMatricula);
+        } else if (data.id) {
+          queryBuilder = queryBuilder.eq('id', data.id);
+        }
+
+        const { data: existingRecords } = await queryBuilder.limit(1);
+        const existingFunc = Array.isArray(existingRecords) && existingRecords.length > 0 ? existingRecords[0] : null;
+
+        const payload: any = {
+          nome: data.nome.trim(),
+          matricula: cleanMatricula,
+          foto_url: data.foto_url || null,
+          cargo: data.cargo || 'Operador Ferroviário / Logística',
+          unidade: data.unidade || 'Malha Operacional VLI',
           genero: data.genero || 'H',
-        },
-        data.treinamentos.map((t, idx) => ({
-          id: `trn-${Date.now()}-${idx}`,
-          funcionario_id: data.id!,
-          nome_curso: t.nome_curso,
-          data_validade: t.data_validade,
-          status: t.status,
-          carga_horaria: t.carga_horaria,
-          origem: t.origem,
-          categoria: t.categoria,
-          vencimento_treinamento: t.vencimento_treinamento,
-          vencimento_aso: t.vencimento_aso,
-          status_webtraining: t.status_webtraining,
-        }))
-      );
-      if (updated) return updated;
+        };
+
+        let savedSupabaseFunc: any = null;
+
+        if (existingFunc) {
+          supabaseFuncId = existingFunc.id;
+          let updateRes = await supabase
+            .from('funcionarios')
+            .update(payload)
+            .eq('id', existingFunc.id)
+            .select()
+            .maybeSingle();
+
+          // Se falhou por ausência de 'genero' na tabela do Supabase
+          if (updateRes.error && updateRes.error.code === '42703') {
+            delete payload.genero;
+            updateRes = await supabase
+              .from('funcionarios')
+              .update(payload)
+              .eq('id', existingFunc.id)
+              .select()
+              .maybeSingle();
+          }
+
+          if (updateRes.error) throw updateRes.error;
+          savedSupabaseFunc = updateRes.data || { ...existingFunc, ...payload };
+        } else {
+          let insertRes = await supabase
+            .from('funcionarios')
+            .insert(payload)
+            .select()
+            .maybeSingle();
+
+          // Se falhou por ausência de 'genero' na tabela do Supabase
+          if (insertRes.error && insertRes.error.code === '42703') {
+            delete payload.genero;
+            insertRes = await supabase
+              .from('funcionarios')
+              .insert(payload)
+              .select()
+              .maybeSingle();
+          }
+
+          if (insertRes.error) throw insertRes.error;
+          savedSupabaseFunc = insertRes.data;
+          supabaseFuncId = savedSupabaseFunc?.id || null;
+        }
+
+        // Salvar treinamentos no Supabase
+        if (supabaseFuncId && Array.isArray(data.treinamentos)) {
+          await supabase.from('treinamentos').delete().eq('funcionario_id', supabaseFuncId);
+
+          if (data.treinamentos.length > 0) {
+            const trnPayload = data.treinamentos.map((t) => ({
+              funcionario_id: supabaseFuncId,
+              nome_curso: t.nome_curso,
+              data_validade: toSafeDateForSupabase(t.data_validade),
+              status: t.status === 'vencido' ? 'vencido' : 'valido',
+              carga_horaria: t.carga_horaria || '20h',
+              categoria: t.categoria || null,
+              vencimento_treinamento: t.vencimento_treinamento || null,
+              vencimento_aso: t.vencimento_aso || null,
+              status_webtraining: t.status_webtraining || null,
+              origem: t.origem || 'manual',
+            }));
+
+            let trnRes = await supabase.from('treinamentos').insert(trnPayload);
+            if (trnRes.error) {
+              // Se falhou por ausência de colunas extras na tabela, insere apenas as colunas padrão
+              const basicPayload = trnPayload.map((t) => ({
+                funcionario_id: t.funcionario_id,
+                nome_curso: t.nome_curso,
+                data_validade: t.data_validade,
+                status: t.status,
+                carga_horaria: t.carga_horaria,
+              }));
+              await supabase.from('treinamentos').insert(basicPayload);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Aviso: Erro ao persistir no Supabase, salvando localmente e no servidor:', err);
+      }
     }
 
-    return this.createFuncionario(
-      {
-        nome: data.nome,
-        matricula: data.matricula,
-        cargo: data.cargo || 'Operação Ferroviária & Logística',
-        unidade: data.unidade || 'Corredor Centro-Leste',
-        foto_url: data.foto_url || null,
-        genero: data.genero || 'H',
-      },
-      data.treinamentos
-    );
+    // 2. Montar o objeto completo do colaborador
+    const finalId = data.id || supabaseFuncId || `vli-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+    const complete: FuncionarioWithTreinamentos = {
+      id: finalId,
+      nome: data.nome.trim(),
+      matricula: cleanMatricula,
+      foto_url: data.foto_url || null,
+      cargo: data.cargo || 'Operação Ferroviária & Logística',
+      unidade: data.unidade || 'Corredor Centro-Leste',
+      genero: data.genero || 'H',
+      created_at: nowIso,
+      treinamentos: (data.treinamentos || []).map((t, idx) => ({
+        id: `trn-${Date.now()}-${idx}`,
+        funcionario_id: finalId,
+        nome_curso: t.nome_curso,
+        data_validade: t.data_validade,
+        status: t.status === 'vencido' ? 'vencido' : 'valido',
+        carga_horaria: t.carga_horaria || '20h',
+        origem: t.origem || 'manual',
+        categoria: t.categoria,
+        vencimento_treinamento: t.vencimento_treinamento,
+        vencimento_aso: t.vencimento_aso,
+        status_webtraining: t.status_webtraining,
+      })),
+    };
+
+    // 3. Salvar no Local Storage (sem duplicar por id ou matrícula)
+    const currentList = loadLocalStore();
+    const cleanMatLower = cleanMatricula.toLowerCase();
+    const filteredList = currentList.filter((f) => {
+      const isSameId = (f.id || '').toLowerCase() === finalId.toLowerCase();
+      const isSameMat = cleanMatLower && (f.matricula || '').trim().toLowerCase() === cleanMatLower;
+      return !isSameId && !isSameMat;
+    });
+
+    const updatedLocalList = [complete, ...filteredList];
+    saveLocalStore(updatedLocalList);
+
+    // 4. Salvar no servidor Express
+    try {
+      await fetch('/api/colaboradores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(complete),
+      });
+    } catch {}
+
+    return complete;
+  },
+
+  /**
+   * Cria um novo colaborador com seus treinamentos
+   */
+  async createFuncionario(
+    funcionario: Omit<Funcionario, 'id' | 'created_at'>,
+    treinamentos: Omit<Treinamento, 'id' | 'funcionario_id'>[]
+  ): Promise<FuncionarioWithTreinamentos> {
+    return this.saveFuncionarioComplete({
+      ...funcionario,
+      treinamentos: treinamentos as any,
+    });
+  },
+
+  /**
+   * Atualiza dados de um colaborador e substitui seus treinamentos
+   */
+  async updateFuncionario(
+    id: string,
+    funcionario: Partial<Funcionario>,
+    treinamentos?: Treinamento[]
+  ): Promise<FuncionarioWithTreinamentos | null> {
+    return this.saveFuncionarioComplete({
+      id,
+      nome: funcionario.nome || '',
+      matricula: funcionario.matricula || '',
+      cargo: funcionario.cargo,
+      unidade: funcionario.unidade,
+      foto_url: funcionario.foto_url || null,
+      genero: funcionario.genero,
+      treinamentos: (treinamentos || []) as any,
+    });
   },
 
   /**
@@ -924,6 +937,43 @@ export const dbService = {
   },
 
   /**
+   * Remove um curso do catálogo dinâmico de cursos
+   * Remove do LocalStorage, do servidor Express e do Supabase
+   */
+  async removeCursoDoCatalogo(nomeCurso: string): Promise<string[]> {
+    const trimmed = nomeCurso.trim();
+    if (!trimmed) return this.getCatalogoCursos();
+
+    let current: string[] = [];
+    try {
+      const raw = localStorage.getItem('vli_catalogo_cursos_adicionados');
+      if (raw) current = JSON.parse(raw) || [];
+    } catch {}
+
+    const filtered = current.filter((c) => c.trim().toLowerCase() !== trimmed.toLowerCase());
+    localStorage.setItem('vli_catalogo_cursos_adicionados', JSON.stringify(filtered));
+
+    // Remove do servidor Express
+    try {
+      await fetch(`/api/catalogo-cursos/${encodeURIComponent(trimmed)}`, {
+        method: 'DELETE',
+      });
+    } catch {}
+
+    // Remove do Supabase se configurado
+    const supabase = getSupabase();
+    if (supabase) {
+      try {
+        await supabase.from('catalogo_cursos').delete().ilike('nome', trimmed);
+      } catch (err) {
+        console.warn('Aviso ao excluir do catálogo no Supabase:', err);
+      }
+    }
+
+    return filtered;
+  },
+
+  /**
    * Adiciona um treinamento avulso a um colaborador existente
    */
   async addTreinamento(
@@ -997,8 +1047,12 @@ create table if not exists public.funcionarios (
   foto_url text,
   cargo text default 'Operador Ferroviário / Portuário',
   unidade text default 'Corredor Centro-Leste',
+  genero text default 'H',
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+
+-- Garantir coluna genero caso a tabela já exista
+alter table public.funcionarios add column if not exists genero text default 'H';
 
 -- 3. Tabela de Treinamentos e Normas
 create table if not exists public.treinamentos (

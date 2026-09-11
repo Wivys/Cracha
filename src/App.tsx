@@ -160,9 +160,27 @@ export default function App() {
     }
   };
 
-  const handleCardGenerated = (savedEmployee: FuncionarioWithTreinamentos) => {
-    loadEmployees();
-    navigateToCard(savedEmployee.matricula || savedEmployee.id);
+  const handleCardGenerated = async (savedEmployee: FuncionarioWithTreinamentos) => {
+    // 1. Atualização otimista imediata na lista de crachás
+    setEmployees((prev) => {
+      const targetMatricula = String(savedEmployee.matricula || '').trim().toLowerCase();
+      const targetId = String(savedEmployee.id || '').trim().toLowerCase();
+      const filtered = prev.filter((e) => {
+        const eMatricula = String(e.matricula || '').trim().toLowerCase();
+        const eId = String(e.id || '').trim().toLowerCase();
+        return (targetMatricula && eMatricula !== targetMatricula) && (targetId && eId !== targetId);
+      });
+      return [savedEmployee, ...filtered];
+    });
+    setEditingEmployee(null);
+
+    // 2. Navega imediatamente para a galeria de crachás
+    navigateToAdminGallery();
+
+    // 3. Atualiza estado em segundo plano para garantir sincronia total
+    try {
+      await loadEmployees();
+    } catch {}
   };
 
   return (
@@ -190,6 +208,7 @@ export default function App() {
             adminUser={adminUser}
             onLogout={handleLogout}
             onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
+            employees={employees}
           >
             <CadastroPage
               editingEmployee={editingEmployee}
@@ -211,6 +230,7 @@ export default function App() {
             adminUser={adminUser}
             onLogout={handleLogout}
             onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
+            employees={employees}
           >
             <GaleriaCardsPage
               employees={employees}

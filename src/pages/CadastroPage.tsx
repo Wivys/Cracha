@@ -11,6 +11,7 @@ import {
   Link as LinkIcon,
   Download,
   Infinity,
+  ChevronDown,
 } from 'lucide-react';
 import {
   FuncionarioWithTreinamentos,
@@ -83,6 +84,19 @@ export const CadastroPage: React.FC<CadastroPageProps> = ({
   const [selectedCourseToAdd, setSelectedCourseToAdd] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = React.useRef<HTMLDivElement>(null);
+
+  // Fecha o dropdown ao clicar fora
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Modais de Curso
   const [editingTraining, setEditingTraining] = useState<TrainingItem | null>(null);
@@ -224,7 +238,41 @@ export const CadastroPage: React.FC<CadastroPageProps> = ({
     }
   };
 
-  // Seleção de curso no dropdown manual
+  // Seleção e adição de curso a partir da lista suspensa
+  const handleSelectCourseFromCatalog = (cursoNome: string) => {
+    if (!cursoNome) return;
+
+    const exists = trainings.some((t) => t.nome_curso.toLowerCase() === cursoNome.toLowerCase());
+    if (!exists) {
+      const nextYear = new Date();
+      nextYear.setFullYear(nextYear.getFullYear() + 2);
+      const dateStr = nextYear.toISOString().split('T')[0];
+
+      setTrainings([
+        ...trainings,
+        {
+          id: `trn-${Date.now()}`,
+          nome_curso: cursoNome,
+          data_validade: dateStr,
+          status: 'valido',
+          origem: 'manual',
+        },
+      ]);
+    }
+    setIsDropdownOpen(false);
+  };
+
+  // Exclui apenas 1 curso específico da lista suspensa e das opções futuras
+  const handleDeleteCourseFromCatalog = async (cursoNome: string) => {
+    try {
+      const updated = await dbService.removeCursoDoCatalogo(cursoNome);
+      setCatalogoCursos(updated.map(repairCorruptedText));
+    } catch (err) {
+      console.error('Erro ao deletar curso do catálogo:', err);
+    }
+  };
+
+  // Seleção de curso no dropdown manual (legado / fallback)
   const handleDropdownSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
     if (!value) return;
@@ -580,33 +628,62 @@ export const CadastroPage: React.FC<CadastroPageProps> = ({
               </span>
             </div>
 
-            {/* Select Dropdown com catálogo dinâmico de cursos */}
-            <div className="relative">
-              <select
-                id="select-cursos-dropdown"
-                value={selectedCourseToAdd}
-                onChange={handleDropdownSelect}
+            {/* Lista suspensa personalizada com catálogo dinâmico de cursos e exclusão individual */}
+            <div className="relative" ref={dropdownRef}>
+              <button
+                type="button"
+                id="select-cursos-dropdown-trigger"
+                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                 disabled={catalogoCursos.length === 0}
-                className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-700 focus:ring-2 focus:ring-[#002B49] focus:outline-none appearance-none cursor-pointer disabled:bg-slate-50 disabled:text-slate-400"
+                className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-700 focus:ring-2 focus:ring-[#002B49] focus:outline-none flex items-center justify-between cursor-pointer disabled:bg-slate-50 disabled:text-slate-400 text-left transition-colors"
               >
-                {catalogoCursos.length === 0 ? (
-                  <option value="">Nenhum curso cadastrado ainda (clique em "+ Adicionar Curso Manual")</option>
-                ) : (
-                  <>
-                    <option value="">Selecione um curso prévio para adicionar ao card...</option>
-                    {catalogoCursos.map((cursoNome) => (
-                      <option key={cursoNome} value={cursoNome}>
+                <span className="truncate">
+                  {catalogoCursos.length === 0
+                    ? 'Nenhum curso cadastrado ainda (clique em "+ Adicionar Curso Manual")'
+                    : 'Selecione um curso prévio para adicionar ao card...'}
+                </span>
+                <ChevronDown
+                  className={`w-4 h-4 text-slate-500 shrink-0 ml-2 transition-transform duration-200 ${
+                    isDropdownOpen ? 'rotate-180 text-[#002B49]' : ''
+                  }`}
+                />
+              </button>
+
+              {/* Lista suspensa aberta */}
+              {isDropdownOpen && catalogoCursos.length > 0 && (
+                <div
+                  id="cursos-dropdown-menu"
+                  className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-xl shadow-xl z-30 max-h-56 overflow-y-auto divide-y divide-slate-100 animate-in fade-in"
+                >
+                  <div className="px-3 py-1.5 bg-slate-50 text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                    <span>Cursos Salvos ({catalogoCursos.length})</span>
+                    <span className="text-[9px] font-normal text-slate-400">Ícone de lixeira para excluir</span>
+                  </div>
+                  {catalogoCursos.map((cursoNome) => (
+                    <div
+                      key={cursoNome}
+                      className="flex items-center justify-between px-3 py-2 hover:bg-slate-50 transition-colors group cursor-pointer"
+                      onClick={() => handleSelectCourseFromCatalog(cursoNome)}
+                    >
+                      <span className="text-xs text-slate-800 font-medium truncate pr-2 group-hover:text-[#002B49]">
                         {cursoNome}
-                      </option>
-                    ))}
-                  </>
-                )}
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-500">
-                <svg className="fill-current h-4 w-4" viewBox="0 0 20 20">
-                  <path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" />
-                </svg>
-              </div>
+                      </span>
+                      <button
+                        type="button"
+                        id={`btn-delete-curso-${cursoNome.replace(/\s+/g, '-').toLowerCase()}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteCourseFromCatalog(cursoNome);
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                        title={`Deletar "${cursoNome}" das opções futuras`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Lista dos Cursos Manuais */}
