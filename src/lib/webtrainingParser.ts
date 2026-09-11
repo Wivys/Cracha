@@ -52,15 +52,23 @@ export async function extractFromWebtrainingUrl(url: string): Promise<Webtrainin
     // Caso o proxy ou a nuvem tenha devolvido uma página de erro HTML ou texto plano
     if (
       responseText.toLowerCase().includes('server error') ||
+      response.status === 500 ||
       response.status === 502 ||
       response.status === 504
     ) {
       throw new Error(
-        'O servidor da Universidade VLI não respondeu a tempo ou está com acesso bloqueado para requisições externas. Utilize o botão "Colar HTML" abaixo para importar os dados diretamente do navegador.'
+        'O servidor corporativo da Universidade VLI restringiu o acesso externo ao link ou a requisição expirou. Utilize a opção "Colar HTML" abaixo para importar os dados diretamente do navegador.'
       );
     }
     throw new Error(
-      `Resposta inválida da Universidade VLI (código ${response.status}). Utilize a opção de colar o HTML da página.`
+      `Resposta inesperada do servidor (código ${response.status}). Utilize a opção de colar o HTML da página.`
+    );
+  }
+
+  if (response.status === 500) {
+    throw new Error(
+      json?.error ||
+        'O servidor da nuvem não pôde acessar o sistema interno da Universidade VLI (firewall corporativo). Utilize a opção "Colar HTML" abaixo para importar os dados diretamente.'
     );
   }
 

@@ -275,33 +275,30 @@ async function startServer() {
           });
         } catch (fetchErr: any) {
           clearTimeout(timeoutTimer);
-          if (fetchErr.name === 'AbortError' || fetchErr.message?.includes('abort')) {
-            return res.status(504).json({
-              success: false,
-              error:
-                'O servidor da Universidade VLI demorou para responder (tempo limite esgotado). Isso ocorre quando a rede corporativa restringe o acesso direto. Utilize a opção de colar o código HTML da página.',
-            });
-          }
-          return res.status(502).json({
+          return res.status(200).json({
             success: false,
-            error: `Não foi possível conectar ao servidor da Universidade VLI: ${fetchErr.message || 'Falha de rede'}. Você pode colar o código HTML diretamente.`,
+            blocked: true,
+            error:
+              'O servidor corporativo da Universidade VLI demorou para responder ou bloqueou o acesso externo direto (firewall corporativo). Utilize a opção de colar o código HTML da página abaixo.',
           });
         } finally {
           clearTimeout(timeoutTimer);
         }
 
         if (!fetchResponse.ok) {
-          return res.status(fetchResponse.status).json({
+          return res.status(200).json({
             success: false,
-            error: `O servidor da Universidade VLI retornou status ${fetchResponse.status}: ${fetchResponse.statusText}.`,
+            blocked: true,
+            error: `O servidor da Universidade VLI retornou status ${fetchResponse.status}: ${fetchResponse.statusText}. Abra o link no navegador e cole o código HTML da página.`,
           });
         }
 
         // Detecta se a página foi redirecionada para a tela de erro do Webtraining
         const finalUrl = fetchResponse.url || '';
         if (finalUrl.includes('erro.asp') || finalUrl.includes('errcode=')) {
-          return res.status(400).json({
+          return res.status(200).json({
             success: false,
+            blocked: true,
             error:
               'O crachá no Webtraining está expirado ou o link é inválido (erro de acesso no sistema da Universidade VLI). Abra o link no navegador e copie o código HTML da página.',
           });
@@ -312,8 +309,9 @@ async function startServer() {
         html = decodeHtmlBuffer(buffer, contentType);
 
         if (html.includes('Erro Desconhecido') || html.includes('erro.asp?errcode')) {
-          return res.status(400).json({
+          return res.status(200).json({
             success: false,
+            blocked: true,
             error:
               'A Universidade VLI retornou "Erro Desconhecido" para este crachá (sessão expirada). Abra o crachá no navegador corporativo e cole o código HTML da página.',
           });
@@ -321,7 +319,7 @@ async function startServer() {
       } else if (htmlContent && typeof htmlContent === 'string') {
         html = repairCorruptedText(htmlContent);
       } else {
-        return res.status(400).json({
+        return res.status(200).json({
           success: false,
           error: 'É necessário fornecer uma URL ou o conteúdo HTML da página.',
         });

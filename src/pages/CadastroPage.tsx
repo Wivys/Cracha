@@ -237,6 +237,8 @@ export const CadastroPage: React.FC<CadastroPageProps> = ({
         tipo: 'erro',
         mensagem: err.message || 'Falha ao conectar à Universidade VLI.',
       });
+      // Abre automaticamente a caixa de importação de HTML para o usuário não ficar travado
+      setShowHtmlInput(true);
     } finally {
       setIsExtracting(false);
     }

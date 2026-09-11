@@ -1,54 +1,122 @@
 import { decodeHtmlBuffer, repairCorruptedText, repairCourseObject } from '../src/lib/textSanitizer';
 
 export default async function handler(req: any, res: any) {
+  // Configuração de cabeçalhos CORS para permitir requisições sem atrito
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ success: false, error: 'Método não permitido. Use POST.' });
   }
 
   try {
-    const { url } = req.body || {};
-    if (!url || typeof url !== 'string') {
-      return res.status(400).json({ success: false, error: 'URL do crachá é obrigatória.' });
+    let body = req.body;
+    if (typeof body === 'string') {
+      try {
+        body = JSON.parse(body);
+      } catch {
+        // Se falhar o parse, body continua como string
+      }
     }
 
-    const cleanUrl = url.trim();
-    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
-      return res.status(400).json({ success: false, error: 'URL inválida. Deve iniciar com http:// ou https://' });
-    }
+    const { url, htmlContent } = body || {};
+    let html = '';
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
+    if (url && typeof url === 'string') {
+      let targetUrl = url.trim();
+      if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+        targetUrl = 'https://' + targetUrl;
+      }
 
-    const response = await fetch(cleanUrl, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-      },
-    });
+      // Timeout de 6 segundos para evitar que funções Vercel estourem o limite
+      const abortController = new AbortController();
+      const timeoutTimer = setTimeout(() => abortController.abort(), 6000);
 
-    clearTimeout(timeout);
+      let fetchResponse: any;
+      try {
+        fetchResponse = await fetch(targetUrl, {
+          signal: abortController.signal,
+          redirect: 'follow',
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            Accept:
+              'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Cache-Control': 'no-cache',
+            Pragma: 'no-cache',
+            Referer: 'https://universidadevli.webtraining.com.br/',
+          },
+        });
+      } catch (fetchErr: any) {
+        clearTimeout(timeoutTimer);
+        // Retorna status 200 com flag de erro para evitar que a Vercel logue 500 no navegador
+        return res.status(200).json({
+          success: false,
+          blocked: true,
+          error:
+            'O servidor corporativo da Universidade VLI restringiu o acesso externo direto ou o tempo limite esgotou. Como a rede corporativa possui firewall, abra o link no seu navegador e utilize a opção "Colar HTML" abaixo.',
+        });
+      } finally {
+        clearTimeout(timeoutTimer);
+      }
 
-    if (!response.ok) {
-      return res.status(response.status).json({
+      if (!fetchResponse.ok) {
+        return res.status(200).json({
+          success: false,
+          blocked: true,
+          error: `O servidor da Universidade VLI retornou status ${fetchResponse.status}. Abra o link no navegador e cole o código HTML da página.`,
+        });
+      }
+
+      // Detecta se a página foi redirecionada para a tela de erro do Webtraining
+      const finalUrl = fetchResponse.url || '';
+      if (finalUrl.includes('erro.asp') || finalUrl.includes('errcode=')) {
+        return res.status(200).json({
+          success: false,
+          blocked: true,
+          error:
+            'O crachá no Webtraining está expirado ou o link é inválido. Abra o link no navegador e copie o código HTML da página.',
+        });
+      }
+
+      const buffer = await fetchResponse.arrayBuffer();
+      const contentType = fetchResponse.headers.get('content-type') || '';
+      html = decodeHtmlBuffer(buffer, contentType);
+
+      if (html.includes('Erro Desconhecido') || html.includes('erro.asp?errcode')) {
+        return res.status(200).json({
+          success: false,
+          blocked: true,
+          error:
+            'A Universidade VLI retornou "Erro Desconhecido" para este link (sessão expirada). Abra o crachá no navegador corporativo e cole o código HTML da página.',
+        });
+      }
+    } else if (htmlContent && typeof htmlContent === 'string') {
+      html = repairCorruptedText(htmlContent);
+    } else {
+      return res.status(200).json({
         success: false,
-        error: `Não foi possível acessar a página do crachá (Status ${response.status}).`,
+        error: 'É necessário fornecer a URL do crachá ou o código HTML da página.',
       });
     }
-
-    // Decodifica o buffer binário preservando a codificação ISO-8859-1 / Windows-1252 do Webtraining
-    const buffer = await response.arrayBuffer();
-    const contentType = response.headers.get('content-type') || '';
-    const html = decodeHtmlBuffer(buffer, contentType);
 
     // 1. Extração do Nome
     let nome = '';
     const nomeMatch =
       html.match(/<span>([A-ZÀ-Ú\s]{3,})<\/span>/i) ||
       html.match(/<h2[^>]*>Crach[áa]<\/h2>[\s\S]*?<span>([^<]+)<\/span>/i) ||
-      html.match(/<strong>Crach[áa]<\/strong><\/h2>[\s\S]*?<p>[\s\S]*?<span>([^<]+)<\/span>/i);
+      html.match(/<strong>Crach[áa]<\/strong><\/h2>[\s\S]*?<p>[\s\S]*?<span>([^<]+)<\/span>/i) ||
+      html.match(/Nome:\s*([A-ZÀ-Úa-z\s]{3,})/i);
     if (nomeMatch && nomeMatch[1]) {
       nome = repairCorruptedText(nomeMatch[1].trim());
     }
@@ -57,7 +125,8 @@ export default async function handler(req: any, res: any) {
     let matricula = '';
     const idMatch =
       html.match(/<span>ID:\s*([0-9A-Za-z\-_]+)<\/span>/i) ||
-      html.match(/ID:\s*([0-9A-Za-z\-_]+)/i);
+      html.match(/ID:\s*([0-9A-Za-z\-_]+)/i) ||
+      html.match(/Matr[íi]cula:\s*([0-9A-Za-z\-_]+)/i);
     if (idMatch && idMatch[1]) {
       matricula = idMatch[1].trim();
     }
@@ -71,7 +140,7 @@ export default async function handler(req: any, res: any) {
       cargo = repairCorruptedText(cargoMatch[1].trim());
     }
 
-    // 4. Extração dos Cursos da tabela
+    // 4. Extração dos Cursos da tabela #tabelaCracha
     const cursos: any[] = [];
     const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
     let rowMatch: RegExpExecArray | null;
@@ -146,9 +215,11 @@ export default async function handler(req: any, res: any) {
       },
     });
   } catch (err: any) {
-    return res.status(500).json({
+    return res.status(200).json({
       success: false,
-      error: `Falha ao processar o link: ${err.message || 'Erro interno'}`,
+      blocked: true,
+      error: `Não foi possível processar o link: ${err.message || 'Erro de conexão'}. Utilize a opção de colar o código HTML da página.`,
     });
   }
 }
+
