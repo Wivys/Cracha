@@ -12,6 +12,8 @@ import {
   Download,
   Infinity,
   ChevronDown,
+  ChevronUp,
+  FileCode,
 } from 'lucide-react';
 import {
   FuncionarioWithTreinamentos,
@@ -20,7 +22,7 @@ import {
 } from '../types';
 import { dbService } from '../lib/supabase';
 import { VliAvatar } from '../components/VliAvatar';
-import { extractFromWebtrainingUrl } from '../lib/webtrainingParser';
+import { extractFromWebtrainingUrl, parseWebtrainingHtml } from '../lib/webtrainingParser';
 import { repairCorruptedText, repairFuncionarioObject } from '../lib/textSanitizer';
 
 interface CadastroPageProps {
@@ -54,6 +56,8 @@ export const CadastroPage: React.FC<CadastroPageProps> = ({
   // Extração via Universidade VLI (Webtraining)
   const [webtrainingUrl, setWebtrainingUrl] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
+  const [showHtmlInput, setShowHtmlInput] = useState(false);
+  const [htmlInputText, setHtmlInputText] = useState('');
   const [extractionFeedback, setExtractionFeedback] = useState<{
     tipo: 'sucesso' | 'erro';
     mensagem: string;
@@ -235,6 +239,72 @@ export const CadastroPage: React.FC<CadastroPageProps> = ({
       });
     } finally {
       setIsExtracting(false);
+    }
+  };
+
+  // Extração a partir do código HTML ou texto colado (Contingência robusta)
+  const handleExtractFromHtml = (rawContent?: string) => {
+    const content = (rawContent || htmlInputText).trim();
+    if (!content) {
+      setExtractionFeedback({
+        tipo: 'erro',
+        mensagem: 'Cole o código HTML da página do crachá para extrair as informações.',
+      });
+      return;
+    }
+
+    try {
+      const parsedData: WebtrainingParsedData = parseWebtrainingHtml(content);
+
+      if (parsedData.nome && (!nome || nome.trim() === '')) {
+        setNome(parsedData.nome);
+      }
+      if (parsedData.matricula && (!matricula || matricula.trim() === '')) {
+        setMatricula(parsedData.matricula);
+      }
+      if (parsedData.cargo && (!cargo || cargo.trim() === '')) {
+        setCargo(parsedData.cargo);
+      }
+
+      if (parsedData.cursos && parsedData.cursos.length > 0) {
+        const novosCursos: TrainingItem[] = parsedData.cursos.map((c, idx) => ({
+          id: `trn-vli-${Date.now()}-${idx}`,
+          nome_curso: c.nome_curso,
+          data_validade: c.data_validade,
+          status: c.status,
+          carga_horaria: '40h',
+          origem: 'universidade_vli',
+          categoria: c.categoria,
+          vencimento_treinamento: c.vencimento_treinamento,
+          vencimento_aso: c.vencimento_aso,
+          status_webtraining: c.status_webtraining,
+        }));
+
+        const idsExistentes = new Set(trainings.map((t) => t.nome_curso.toLowerCase()));
+        const cursosFiltrados = novosCursos.filter(
+          (c) => !idsExistentes.has(c.nome_curso.toLowerCase())
+        );
+
+        setTrainings((prev) => [...prev, ...cursosFiltrados]);
+
+        setExtractionFeedback({
+          tipo: 'sucesso',
+          mensagem: `${cursosFiltrados.length} treinamentos da Universidade VLi importados com sucesso a partir do HTML!`,
+        });
+        setHtmlInputText('');
+        setShowHtmlInput(false);
+      } else {
+        setExtractionFeedback({
+          tipo: 'sucesso',
+          mensagem: 'Dados pessoais identificados. Não foi possível detectar cursos na tabela HTML colada.',
+        });
+      }
+    } catch (err: any) {
+      console.error('Erro na extração HTML:', err);
+      setExtractionFeedback({
+        tipo: 'erro',
+        mensagem: err.message || 'Não foi possível interpretar o código HTML colado.',
+      });
     }
   };
 
@@ -454,21 +524,87 @@ export const CadastroPage: React.FC<CadastroPageProps> = ({
               </button>
             </div>
 
+            {/* Alternativa: Colar Código HTML / Texto da Página */}
+            <div className="mt-2 pt-2 border-t border-slate-200/70">
+              <button
+                type="button"
+                id="btn-toggle-html-import"
+                onClick={() => setShowHtmlInput(!showHtmlInput)}
+                className="text-[11px] font-bold text-[#002B49] hover:text-[#FFB81C] transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                <FileCode className="w-3 h-3" />
+                <span>
+                  {showHtmlInput
+                    ? 'Ocultar importação por código HTML'
+                    : 'Não conseguiu pelo link? Clique aqui para colar o código HTML da página'}
+                </span>
+                {showHtmlInput ? (
+                  <ChevronUp className="w-3 h-3" />
+                ) : (
+                  <ChevronDown className="w-3 h-3" />
+                )}
+              </button>
+
+              {showHtmlInput && (
+                <div className="mt-2.5 p-2.5 bg-white border border-slate-300 rounded-xl">
+                  <p className="text-[10px] text-slate-500 mb-1.5 leading-relaxed">
+                    Abra o link do crachá no seu navegador corporativo, pressione{' '}
+                    <kbd className="px-1 py-0.5 bg-slate-100 border border-slate-300 rounded font-mono text-[9px]">
+                      Ctrl + U
+                    </kbd>{' '}
+                    (ou clique com o botão direito e selecione <em>Exibir código-fonte</em>), selecione tudo, copie e cole abaixo:
+                  </p>
+                  <textarea
+                    rows={4}
+                    value={htmlInputText}
+                    onChange={(e) => setHtmlInputText(e.target.value)}
+                    placeholder="Cole aqui o código HTML ou o texto copiado da página do crachá da Webtraining..."
+                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-[10px] font-mono text-slate-800 focus:bg-white focus:ring-1 focus:ring-[#002B49] focus:outline-none"
+                  />
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      type="button"
+                      id="btn-processar-html-webtraining"
+                      onClick={() => handleExtractFromHtml()}
+                      disabled={!htmlInputText.trim()}
+                      className="px-3 py-1.5 bg-[#002B49] hover:bg-blue-950 text-white font-bold text-xs rounded-lg transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+                    >
+                      <Download className="w-3 h-3 text-[#FFB81C]" />
+                      <span>Processar Código HTML</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Feedback da Extração */}
             {extractionFeedback && (
               <div
-                className={`mt-2.5 px-3 py-2 rounded-xl text-xs flex items-center gap-2 ${
+                className={`mt-2.5 px-3 py-2 rounded-xl text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 ${
                   extractionFeedback.tipo === 'sucesso'
                     ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                     : 'bg-rose-50 text-rose-800 border border-rose-200'
                 }`}
               >
-                {extractionFeedback.tipo === 'sucesso' ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                ) : (
-                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <div className="flex items-center gap-2">
+                  {extractionFeedback.tipo === 'sucesso' ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                  )}
+                  <span className="font-semibold text-[11px]">{extractionFeedback.mensagem}</span>
+                </div>
+
+                {extractionFeedback.tipo === 'erro' && !showHtmlInput && (
+                  <button
+                    type="button"
+                    onClick={() => setShowHtmlInput(true)}
+                    className="px-2.5 py-1 bg-white hover:bg-rose-100 text-rose-800 border border-rose-300 rounded-lg text-[10px] font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1"
+                  >
+                    <FileCode className="w-3 h-3 text-rose-600" />
+                    <span>Colar HTML da página</span>
+                  </button>
                 )}
-                <span className="font-semibold text-[11px]">{extractionFeedback.mensagem}</span>
               </div>
             )}
           </div>

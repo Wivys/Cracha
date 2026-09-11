@@ -10,22 +10,59 @@ import { repairCorruptedText, repairCourseObject } from './textSanitizer';
  * Extrai dados via chamada à API do backend (/api/extract-webtraining)
  */
 export async function extractFromWebtrainingUrl(url: string): Promise<WebtrainingParsedData> {
-  const cleanUrl = url.trim();
+  let cleanUrl = url.trim();
 
   if (!cleanUrl) {
     throw new Error('Informe a URL do crachá da Universidade VLI.');
   }
 
-  // Chamar o endpoint no backend Express para contornar restrições de CORS
-  const response = await fetch('/api/extract-webtraining', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ url: cleanUrl }),
-  });
+  // Previne erros caso o usuário cole sem o protocolo https://
+  if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+    cleanUrl = 'https://' + cleanUrl;
+  }
 
-  const json = await response.json();
+  let response: Response;
+  try {
+    // Chamar o endpoint no backend Express com proteção contra CORS e timeout
+    response = await fetch('/api/extract-webtraining', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ url: cleanUrl }),
+    });
+  } catch (networkErr: any) {
+    throw new Error(
+      'Não foi possível estabelecer conexão com o servidor local. Verifique sua conexão e tente novamente.'
+    );
+  }
+
+  let responseText = '';
+  try {
+    responseText = await response.text();
+  } catch {
+    throw new Error('Falha ao ler resposta da Universidade VLI.');
+  }
+
+  // Parse defensivo de JSON para evitar o erro "Unexpected token 'A', 'A server e'... is not valid JSON"
+  let json: any = null;
+  try {
+    json = JSON.parse(responseText);
+  } catch {
+    // Caso o proxy ou a nuvem tenha devolvido uma página de erro HTML ou texto plano
+    if (
+      responseText.toLowerCase().includes('server error') ||
+      response.status === 502 ||
+      response.status === 504
+    ) {
+      throw new Error(
+        'O servidor da Universidade VLI não respondeu a tempo ou está com acesso bloqueado para requisições externas. Utilize o botão "Colar HTML" abaixo para importar os dados diretamente do navegador.'
+      );
+    }
+    throw new Error(
+      `Resposta inválida da Universidade VLI (código ${response.status}). Utilize a opção de colar o HTML da página.`
+    );
+  }
 
   if (!response.ok || !json.success) {
     throw new Error(json.error || 'Falha ao extrair dados da Universidade VLI.');
@@ -41,12 +78,12 @@ export async function extractFromWebtrainingUrl(url: string): Promise<Webtrainin
 }
 
 /**
- * Analisa e extrai informações diretamente a partir do código HTML da página do Webtraining
- * Útil para contingência caso o usuário cole o código fonte ou em caso de rede interna
+ * Analisa e extrai informações diretamente a partir do código HTML ou texto da página do Webtraining
+ * Útil para contingência caso o usuário cole o código fonte ou em caso de rede interna corporativa
  */
 export function parseWebtrainingHtml(html: string): WebtrainingParsedData {
   if (!html || typeof html !== 'string') {
-    throw new Error('Conteúdo HTML inválido.');
+    throw new Error('Conteúdo HTML ou texto inválido.');
   }
 
   // 1. Extração do Nome
@@ -54,7 +91,8 @@ export function parseWebtrainingHtml(html: string): WebtrainingParsedData {
   const nomeMatch =
     html.match(/<span>([A-ZÀ-Ú\s]{3,})<\/span>/i) ||
     html.match(/<h2[^>]*>Crach[áa]<\/h2>[\s\S]*?<span>([^<]+)<\/span>/i) ||
-    html.match(/<strong>Crach[áa]<\/strong><\/h2>[\s\S]*?<p>[\s\S]*?<span>([^<]+)<\/span>/i);
+    html.match(/<strong>Crach[áa]<\/strong><\/h2>[\s\S]*?<p>[\s\S]*?<span>([^<]+)<\/span>/i) ||
+    html.match(/Nome:\s*([A-ZÀ-Úa-z\s]{3,})/i);
   if (nomeMatch && nomeMatch[1]) {
     nome = nomeMatch[1].trim();
   }
@@ -63,7 +101,8 @@ export function parseWebtrainingHtml(html: string): WebtrainingParsedData {
   let matricula = '';
   const idMatch =
     html.match(/<span>ID:\s*([0-9A-Za-z\-_]+)<\/span>/i) ||
-    html.match(/ID:\s*([0-9A-Za-z\-_]+)/i);
+    html.match(/ID:\s*([0-9A-Za-z\-_]+)/i) ||
+    html.match(/Matr[íi]cula:\s*([0-9A-Za-z\-_]+)/i);
   if (idMatch && idMatch[1]) {
     matricula = idMatch[1].trim();
   }
@@ -142,6 +181,45 @@ export function parseWebtrainingHtml(html: string): WebtrainingParsedData {
           origem: 'universidade_vli',
         })
       );
+    }
+  }
+
+  // Fallback: se não encontrou em <tr><td> (ex: texto copiado diretamente da página)
+  if (cursos.length === 0) {
+    const lines = html.split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.toLowerCase().includes('categoria') || trimmed.toLowerCase().includes('vencimento')) {
+        continue;
+      }
+
+      const dateMatch = trimmed.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      if (dateMatch) {
+        // Tenta separar por tabulação ou múltiplos espaços
+        const parts = trimmed.split(/\t+| {2,}/).map((p) => p.trim()).filter(Boolean);
+        const nomeCurso = parts[1] && parts[1].length > 3 ? parts[1] : parts[0];
+
+        if (nomeCurso && !nomeCurso.toLowerCase().includes('requisitos') && nomeCurso.length > 2) {
+          const [, dia, mes, ano] = dateMatch;
+          const dataValidadeISO = `${ano}-${mes}-${dia}`;
+          const dateObj = new Date(parseInt(ano, 10), parseInt(mes, 10) - 1, parseInt(dia, 10));
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+
+          cursos.push(
+            repairCourseObject({
+              nome_curso: repairCorruptedText(nomeCurso),
+              categoria: 'Requisitos Legais',
+              vencimento_treinamento: dateMatch[0],
+              vencimento_aso: 'Não aplicável',
+              status_webtraining: 'Liberado',
+              status: dateObj < today ? 'vencido' : 'valido',
+              data_validade: dataValidadeISO,
+              origem: 'universidade_vli',
+            })
+          );
+        }
+      }
     }
   }
 
