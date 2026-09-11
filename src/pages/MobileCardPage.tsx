@@ -10,8 +10,6 @@ import {
   Copy,
   GraduationCap,
   QrCode,
-  RotateCw,
-  ArrowRight,
   X,
   UserCheck,
   Clock,
@@ -345,17 +343,6 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
         </button>
 
         <div className="flex items-center gap-2">
-          {/* Botão de Giro Superior Rápido */}
-          <button
-            type="button"
-            onClick={handleToggleSide}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white sm:bg-slate-800/90 hover:bg-slate-50 sm:hover:bg-slate-800 text-[#002B49] sm:text-[#FFB81C] rounded-xl text-xs font-bold transition-all border border-slate-200 sm:border-slate-700 shadow-2xs cursor-pointer"
-            title="Girar Crachá (Efeito 3D)"
-          >
-            <RotateCw className="w-3.5 h-3.5 transition-transform group-hover:rotate-180" />
-            <span>Girar</span>
-          </button>
-
           <button
             type="button"
             onClick={() => setShowQrModal(true)}
@@ -429,7 +416,7 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
               <div className="h-1.5 bg-[#FFB81C] w-full" />
 
               {/* Barra de Alternância Frente e Verso */}
-              <div className="px-3 sm:px-6 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2">
+              <div className="px-3 sm:px-6 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-center">
                 <div className="inline-flex p-1 bg-slate-200/80 rounded-xl text-xs font-bold">
                   <button
                     type="button"
@@ -448,18 +435,6 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
                     Verso (Treinamentos)
                   </button>
                 </div>
-
-                {/* Botão Girar Cartão com animação */}
-                <button
-                  type="button"
-                  id="btn-girar-cracha-frente"
-                  onClick={handleToggleSide}
-                  className="inline-flex items-center gap-1.5 text-xs font-bold text-[#002B49] hover:text-amber-600 px-3 py-1.5 rounded-xl hover:bg-slate-200/70 transition-colors cursor-pointer"
-                  title="Clique para girar o crachá em 3D"
-                >
-                  <RotateCw className="w-3.5 h-3.5" />
-                  <span>Girar Cartão</span>
-                </button>
               </div>
 
               {/* Corpo da Frente: Cabeçalho Lado a Lado */}
@@ -595,7 +570,7 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
             </div>
 
             {/* Ações do Rodapé da Frente */}
-            <div className="p-4 sm:p-6 md:p-8 pt-0 space-y-2.5">
+            <div className="p-4 sm:p-6 md:p-8 pt-0">
               <button
                 type="button"
                 id="btn-exportar-qr-code"
@@ -604,17 +579,6 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
               >
                 <QrCode className="w-5 h-5 text-slate-950 stroke-[2.5]" />
                 <span>Exportar QR Code de Acesso</span>
-              </button>
-
-              <button
-                type="button"
-                id="btn-ver-treinamentos-girar"
-                onClick={handleToggleSide}
-                className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs sm:text-sm rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer group"
-              >
-                <RotateCw className="w-4 h-4 text-slate-500 group-hover:rotate-180 transition-transform" />
-                <span>Girar e Ver Treinamentos (Verso)</span>
-                <ArrowRight className="w-4 h-4 text-slate-400 ml-auto" />
               </button>
             </div>
           </div>
@@ -651,7 +615,7 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
               <div className="h-1.5 bg-[#FFB81C] w-full" />
 
               {/* Barra de Alternância Frente e Verso */}
-              <div className="px-3 sm:px-6 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2">
+              <div className="px-3 sm:px-6 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-center">
                 <div className="inline-flex p-1 bg-slate-200/80 rounded-xl text-xs font-bold">
                   <button
                     type="button"
@@ -668,18 +632,6 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
                     Verso (Treinamentos)
                   </button>
                 </div>
-
-                {/* Botão Girar Cartão */}
-                <button
-                  type="button"
-                  id="btn-girar-cracha-verso"
-                  onClick={handleToggleSide}
-                  className="inline-flex items-center gap-1.5 text-xs font-bold text-[#002B49] hover:text-amber-600 px-3 py-1.5 rounded-xl hover:bg-slate-200/70 transition-colors cursor-pointer"
-                  title="Clique para girar de volta para a Frente"
-                >
-                  <RotateCw className="w-3.5 h-3.5" />
-                  <span>Girar Cartão</span>
-                </button>
               </div>
 
               {/* Conteúdo do Verso: Cabeçalho Compacto + Treinamentos Lado a Lado (2 por linha) */}
@@ -923,23 +875,13 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
             </div>
 
             {/* Ações do Rodapé do Verso */}
-            <div className="p-4 sm:p-6 md:p-8 pt-0 space-y-2">
-              <button
-                type="button"
-                id="btn-voltar-frente-girar"
-                onClick={handleToggleSide}
-                className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs sm:text-sm rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer group"
-              >
-                <RotateCw className="w-4 h-4 text-slate-500 group-hover:-rotate-180 transition-transform" />
-                <span>Girar e Voltar para a Frente</span>
-              </button>
-
+            <div className="p-4 sm:p-6 md:p-8 pt-0">
               <button
                 type="button"
                 onClick={() => setShowQrModal(true)}
-                className="w-full py-2.5 px-4 bg-[#FFB81C] hover:bg-[#F5A800] text-slate-950 font-black text-xs sm:text-sm rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                className="w-full py-3 px-5 bg-[#FFB81C] hover:bg-[#F5A800] active:scale-98 text-slate-950 font-black text-sm sm:text-base rounded-2xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer border border-amber-400"
               >
-                <QrCode className="w-4 h-4 stroke-[2.5]" />
+                <QrCode className="w-5 h-5 stroke-[2.5]" />
                 <span>Exportar QR Code de Acesso</span>
               </button>
             </div>

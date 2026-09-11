@@ -32,12 +32,24 @@ export default function App() {
     setLoadingEmployees(true);
     try {
       const data = await dbService.getFuncionarios();
-      const seenIds = new Set<string>();
-      const deduped = (data || []).filter((emp) => {
-        if (!emp?.id || seenIds.has(emp.id)) return false;
-        seenIds.add(emp.id);
-        return true;
-      });
+      const seenKeys = new Set<string>();
+      const deduped: FuncionarioWithTreinamentos[] = [];
+
+      for (const emp of data || []) {
+        if (!emp) continue;
+        const key = String(emp.matricula || emp.id || '').trim().toLowerCase();
+        if (!key || seenKeys.has(key)) continue;
+        seenKeys.add(key);
+
+        deduped.push({
+          ...emp,
+          id: emp.id || `vli-${emp.matricula || Date.now()}`,
+          matricula: String(emp.matricula || ''),
+          nome: emp.nome || 'Colaborador VLI',
+          treinamentos: Array.isArray(emp.treinamentos) ? emp.treinamentos : [],
+        });
+      }
+
       setEmployees(deduped);
     } catch (err) {
       console.error('Erro ao carregar colaboradores:', err);
@@ -110,6 +122,7 @@ export default function App() {
   const navigateToAdminGallery = () => {
     setEditingEmployee(null);
     setCurrentView('admin_galeria');
+    loadEmployees();
     window.history.pushState({}, '', '/');
   };
 

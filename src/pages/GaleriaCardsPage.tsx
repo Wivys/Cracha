@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { VliLogo } from '../components/VliLogo';
 import { QrCodeDisplay } from '../components/QrCodeDisplay';
 import { VliAvatar } from '../components/VliAvatar';
@@ -19,7 +19,7 @@ import {
   FuncionarioWithTreinamentos,
   FilterStatus,
 } from '../types';
-import { dbService } from '../lib/supabase';
+import { dbService, loadLocalStore } from '../lib/supabase';
 
 interface GaleriaCardsPageProps {
   employees: FuncionarioWithTreinamentos[];
@@ -66,6 +66,18 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
   // Copied feedback toast
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  // Refresh employees on mount to ensure cards are always loaded
+  useEffect(() => {
+    onRefresh();
+  }, [onRefresh]);
+
+  // Fallback para armazenamento local caso a prop employees ainda esteja vazia
+  const activeEmployees = useMemo(() => {
+    if (employees && employees.length > 0) return employees;
+    const local = loadLocalStore();
+    return local || [];
+  }, [employees]);
+
   // Helper to compute course statuses of an employee
   const getEmployeeStatusSummary = (emp: FuncionarioWithTreinamentos) => {
     const today = new Date();
@@ -74,36 +86,53 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
     const thirtyDaysAhead = new Date();
     thirtyDaysAhead.setDate(thirtyDaysAhead.getDate() + 30);
 
-    const hasExpired = emp.treinamentos.some(
-      (t) => t.status === 'vencido' || new Date(t.data_validade) < today
-    );
+    const treinamentos = Array.isArray(emp.treinamentos) ? emp.treinamentos : [];
 
-    const hasExpiringSoon = emp.treinamentos.some((t) => {
+    const hasExpired = treinamentos.some((t) => {
+      if (!t) return false;
+      if (t.status === 'vencido') return true;
+      if (t.data_validade) {
+        const d = new Date(t.data_validade);
+        return !isNaN(d.getTime()) && d < today;
+      }
+      return false;
+    });
+
+    const hasExpiringSoon = treinamentos.some((t) => {
+      if (!t || !t.data_validade) return false;
       const d = new Date(t.data_validade);
-      return t.status === 'valido' && d >= today && d <= thirtyDaysAhead;
+      return !isNaN(d.getTime()) && t.status === 'valido' && d >= today && d <= thirtyDaysAhead;
     });
 
     return {
       hasExpired,
       hasExpiringSoon,
-      total: emp.treinamentos.length,
-      validos: emp.treinamentos.filter(
-        (t) => t.status === 'valido' && new Date(t.data_validade) >= today
-      ).length,
+      total: treinamentos.length,
+      validos: treinamentos.filter((t) => {
+        if (!t) return false;
+        if (t.status !== 'valido') return false;
+        if (!t.data_validade) return true;
+        const d = new Date(t.data_validade);
+        return isNaN(d.getTime()) || d >= today;
+      }).length,
     };
   };
 
   // Filter and Search logic
   const filteredEmployees = useMemo(() => {
-    const seenIds = new Set<string>();
-    return employees.filter((emp) => {
-      if (!emp || !emp.id || seenIds.has(emp.id)) return false;
-      seenIds.add(emp.id);
+    const seenKeys = new Set<string>();
+    const term = searchTerm.toLowerCase().trim();
 
-      const matchSearch =
-        emp.matricula.toLowerCase().includes(searchTerm.toLowerCase().trim()) ||
-        emp.nome.toLowerCase().includes(searchTerm.toLowerCase().trim());
+    return activeEmployees.filter((emp, idx) => {
+      if (!emp) return false;
+      const key = String(emp.matricula || emp.id || `emp-${idx}`).trim().toLowerCase();
+      if (!key || seenKeys.has(key)) return false;
+      seenKeys.add(key);
 
+      const mat = String(emp.matricula || '').toLowerCase();
+      const nm = String(emp.nome || '').toLowerCase();
+
+      const matchSearch = !term || mat.includes(term) || nm.includes(term);
       if (!matchSearch) return false;
 
       const summary = getEmployeeStatusSummary(emp);
@@ -115,11 +144,11 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
         return summary.hasExpiringSoon;
       }
       if (filterStatus === 'validos') {
-        return !summary.hasExpired && summary.validos > 0;
+        return !summary.hasExpired;
       }
       return true;
     });
-  }, [employees, searchTerm, filterStatus]);
+  }, [activeEmployees, searchTerm, filterStatus]);
 
   // Action: Copiar Link (ícone de globo)
   const handleCopyLink = async (emp: FuncionarioWithTreinamentos) => {
@@ -295,12 +324,13 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
           {filteredEmployees.map((emp, idx) => {
-            const cardUrl = `${window.location.origin}/card/${emp.matricula || emp.id}`;
+            const cardKey = String(emp.matricula || emp.id || idx);
+            const cardUrl = `${window.location.origin}/card/${encodeURIComponent(emp.matricula || emp.id || '')}`;
 
             return (
               <div
-                key={`${emp.id}-${emp.matricula || idx}`}
-                id={`card-funcionario-${emp.matricula}`}
+                key={`${emp.id || emp.matricula || idx}-${idx}`}
+                id={`card-funcionario-${cardKey}`}
                 className="bg-white rounded-xl shadow-md hover:shadow-lg transition-all border border-slate-200 overflow-hidden flex flex-col justify-between"
               >
                 <div>
@@ -322,7 +352,7 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
                     <div className="mb-2">
                       <VliAvatar
                         fotoUrl={emp.foto_url}
-                        nome={emp.nome}
+                        nome={emp.nome || 'Colaborador VLI'}
                         genero={emp.genero}
                         size="md"
                         className="w-16 h-16 rounded-2xl border-2 border-[#FFB81C] shadow-xs group-hover:scale-105 transition-transform"
@@ -331,12 +361,12 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
 
                     {/* Centered Employee Name in bold uppercase */}
                     <h3 className="text-xs sm:text-sm font-black text-slate-900 tracking-tight uppercase group-hover:text-[#002B49] transition-colors line-clamp-1">
-                      {emp.nome}
+                      {emp.nome || 'Colaborador VLI'}
                     </h3>
 
                     {/* Matrícula */}
                     <p className="text-[11px] font-semibold text-slate-600 mt-0.5 font-mono">
-                      Matrícula: {emp.matricula}
+                      Matrícula: {emp.matricula || '---'}
                     </p>
 
                     {/* QR Code */}
@@ -345,8 +375,8 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
                         value={cardUrl}
                         size={110}
                         showActions={false}
-                        matricula={emp.matricula}
-                        nome={emp.nome}
+                        matricula={emp.matricula || ''}
+                        nome={emp.nome || ''}
                       />
                     </div>
 
@@ -362,7 +392,7 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
                   {/* 1: Pencil (Editar) - pale yellow/tan background with dark amber icon */}
                   <button
                     type="button"
-                    id={`btn-editar-${emp.matricula}`}
+                    id={`btn-editar-${cardKey}`}
                     onClick={() => onEdit(emp)}
                     className="w-8 h-8 rounded-lg bg-[#FDE68A] hover:bg-[#FCD34D] text-[#92400E] flex items-center justify-center transition-colors shadow-2xs"
                     title="Editar colaborador e cursos"
@@ -373,7 +403,7 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
                   {/* 2: Trash (Excluir) - red background with white trash icon */}
                   <button
                     type="button"
-                    id={`btn-excluir-${emp.matricula}`}
+                    id={`btn-excluir-${cardKey}`}
                     onClick={() => setDeletingEmp(emp)}
                     className="w-8 h-8 rounded-lg bg-[#DC2626] hover:bg-[#B91C1C] text-white flex items-center justify-center transition-colors shadow-2xs"
                     title="Excluir crachá"
@@ -384,7 +414,7 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
                   {/* 3: Plus (+ Adicionar Curso) - dark blue background with white plus icon */}
                   <button
                     type="button"
-                    id={`btn-add-curso-${emp.matricula}`}
+                    id={`btn-add-curso-${cardKey}`}
                     onClick={() => openQuickCourseModal(emp)}
                     className="w-8 h-8 rounded-lg bg-[#002B49] hover:bg-blue-950 text-white flex items-center justify-center transition-colors shadow-2xs"
                     title="Adicionar curso diretamente"
@@ -395,7 +425,7 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
                   {/* 4: Globe (Copiar Link) - pale yellow/tan background with dark amber globe icon */}
                   <button
                     type="button"
-                    id={`btn-copiar-link-${emp.matricula}`}
+                    id={`btn-copiar-link-${cardKey}`}
                     onClick={() => handleCopyLink(emp)}
                     className="w-8 h-8 rounded-lg bg-[#FDE68A] hover:bg-[#FCD34D] text-[#92400E] flex items-center justify-center transition-colors shadow-2xs"
                     title="Copiar link público do crachá"

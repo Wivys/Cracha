@@ -86,15 +86,17 @@ async function startServer() {
 
   // 2. Buscar colaborador por ID ou Matrícula (utilizado na leitura do QR Code)
   app.get('/api/colaboradores/:idOrMatricula', (req, res) => {
-    const param = (req.params.idOrMatricula || '').trim().toLowerCase();
+    const param = String(req.params.idOrMatricula || '').trim().toLowerCase();
     const cleanDigits = param.replace(/\D/g, '');
 
     const list = readColaboradores();
     const found = list.find((c) => {
       if (!c) return false;
-      const matchId = (c.id || '').toLowerCase() === param;
-      const matchMat = (c.matricula || '').toLowerCase() === param;
-      const cDigits = (c.matricula || '').replace(/\D/g, '');
+      const cId = String(c.id || '').toLowerCase();
+      const cMat = String(c.matricula || '').toLowerCase();
+      const matchId = cId === param;
+      const matchMat = cMat === param;
+      const cDigits = String(c.matricula || '').replace(/\D/g, '');
       const matchDigits = cleanDigits.length > 0 && cDigits === cleanDigits;
       return matchId || matchMat || matchDigits;
     });
@@ -128,10 +130,13 @@ async function startServer() {
       treinamentos: Array.isArray(payload.treinamentos) ? payload.treinamentos : [],
     };
 
+    const targetMat = String(payload.matricula).toLowerCase();
+    const targetId = String(id).toLowerCase();
+
     const index = list.findIndex(
       (c) =>
-        (c.id && c.id === id) ||
-        (c.matricula && c.matricula.toLowerCase() === payload.matricula.toLowerCase())
+        (c.id && String(c.id).toLowerCase() === targetId) ||
+        (c.matricula && String(c.matricula).toLowerCase() === targetMat)
     );
 
     if (index >= 0) {
@@ -154,22 +159,39 @@ async function startServer() {
     const current = readColaboradores();
     const map = new Map<string, any>();
 
+    const getSafeKey = (c: any, index: number) => {
+      if (!c) return '';
+      const mat = c.matricula !== undefined && c.matricula !== null ? String(c.matricula).trim().toLowerCase() : '';
+      const id = c.id !== undefined && c.id !== null ? String(c.id).trim().toLowerCase() : '';
+      return mat || id || `idx-${index}`;
+    };
+
     // Colaboradores existentes no servidor
-    for (const c of current) {
-      if (c && c.matricula) {
-        map.set(c.matricula.toLowerCase(), c);
+    current.forEach((c, idx) => {
+      const key = getSafeKey(c, idx);
+      if (key) {
+        map.set(key, c);
       }
-    }
+    });
 
     // Mesclar do navegador
-    for (const c of colaboradores) {
-      if (c && c.matricula) {
-        const key = c.matricula.toLowerCase();
+    colaboradores.forEach((c, idx) => {
+      const key = getSafeKey(c, idx);
+      if (key) {
         if (!map.has(key)) {
           map.set(key, c);
+        } else {
+          const existing = map.get(key);
+          const trainExisting = Array.isArray(existing.treinamentos) ? existing.treinamentos : [];
+          const trainNew = Array.isArray(c.treinamentos) ? c.treinamentos : [];
+          map.set(key, {
+            ...existing,
+            ...c,
+            treinamentos: trainNew.length >= trainExisting.length ? trainNew : trainExisting,
+          });
         }
       }
-    }
+    });
 
     const merged = Array.from(map.values());
     writeColaboradores(merged);

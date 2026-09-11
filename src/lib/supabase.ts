@@ -55,6 +55,18 @@ const LOCAL_STORAGE_KEY = 'vli_database_colaboradores_prod_v1';
 const ADMIN_MASTER_KEY = 'vli_admin_master_credential_v1';
 const ADMIN_SESSION_KEY = 'vli_admin_session_active_v1';
 
+// Chaves legadas para recuperação de crachás criados anteriormente
+const LEGACY_STORAGE_KEYS = [
+  'vli_database_colaboradores',
+  'vli_colaboradores',
+  'vli_funcionarios',
+  'colaboradores',
+  'funcionarios',
+  'vli_cards',
+  'cards',
+  'vli_employees',
+];
+
 interface MasterAdminCredential {
   usuario: string;
   senhaHash: string;
@@ -63,19 +75,96 @@ interface MasterAdminCredential {
 }
 
 /**
- * Lê os colaboradores cadastrados localmente (banco limpo pronto para produção)
+ * Lê os colaboradores cadastrados localmente (com suporte a recuperação e migração de chaves legadas)
  */
 export const loadLocalStore = (): FuncionarioWithTreinamentos[] => {
   try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (!raw) {
-      return [];
+    if (typeof localStorage === 'undefined') return [];
+
+    const map = new Map<string, FuncionarioWithTreinamentos>();
+
+    const getColabKey = (c: any, index: number): string => {
+      if (!c) return '';
+      const mat = c.matricula !== undefined && c.matricula !== null ? String(c.matricula).trim().toLowerCase() : '';
+      const id = c.id !== undefined && c.id !== null ? String(c.id).trim().toLowerCase() : '';
+      return mat || id || `idx-${index}`;
+    };
+
+    // 1. Chave principal de produção
+    const mainRaw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (mainRaw) {
+      try {
+        const parsed = JSON.parse(mainRaw);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((item, idx) => {
+            if (item && (item.nome || item.matricula)) {
+              const repaired = repairFuncionarioObject(item);
+              const key = getColabKey(repaired, idx);
+              if (key) map.set(key, repaired);
+            }
+          });
+        }
+      } catch (err) {
+        console.warn('Aviso ao ler LOCAL_STORAGE_KEY:', err);
+      }
     }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
+
+    // 2. Chaves legadas de versões anteriores
+    for (const legacyKey of LEGACY_STORAGE_KEYS) {
+      try {
+        const legacyRaw = localStorage.getItem(legacyKey);
+        if (legacyRaw) {
+          const parsed = JSON.parse(legacyRaw);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((item, idx) => {
+              if (item && (item.nome || item.matricula)) {
+                const repaired = repairFuncionarioObject(item);
+                const key = getColabKey(repaired, idx);
+                if (key && !map.has(key)) {
+                  map.set(key, repaired);
+                }
+              }
+            });
+          }
+        }
+      } catch {}
     }
-    return parsed.map(repairFuncionarioObject);
+
+    // 3. Varredura de segurança em todas as chaves do localStorage caso o nome da chave tenha variado
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k || k === LOCAL_STORAGE_KEY || LEGACY_STORAGE_KEYS.includes(k) || k.startsWith('vli_admin')) continue;
+        if (k.toLowerCase().includes('colaborador') || k.toLowerCase().includes('card') || k.toLowerCase().includes('func')) {
+          const val = localStorage.getItem(k);
+          if (val && val.includes('matricula')) {
+            const parsed = JSON.parse(val);
+            if (Array.isArray(parsed)) {
+              parsed.forEach((item, idx) => {
+                if (item && (item.nome || item.matricula)) {
+                  const repaired = repairFuncionarioObject(item);
+                  const key = getColabKey(repaired, idx);
+                  if (key && !map.has(key)) {
+                    map.set(key, repaired);
+                  }
+                }
+              });
+            }
+          }
+        }
+      }
+    } catch {}
+
+    const result = Array.from(map.values());
+
+    // Se encontramos dados e a chave principal estava vazia, salva na chave principal
+    if (result.length > 0 && (!mainRaw || mainRaw === '[]')) {
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(result));
+      } catch {}
+    }
+
+    return result;
   } catch (e) {
     console.error('Erro ao ler colaboradores locais:', e);
     return [];
@@ -87,7 +176,9 @@ export const loadLocalStore = (): FuncionarioWithTreinamentos[] => {
  */
 export const saveLocalStore = (data: FuncionarioWithTreinamentos[]) => {
   try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
+    }
   } catch (e) {
     console.error('Erro ao salvar colaboradores locais:', e);
   }
@@ -350,31 +441,56 @@ export const dbService = {
 
     const localList = loadLocalStore();
 
-    // Se houver dados locais que ainda não estão no servidor, sincroniza-os
-    if (localList.length > 0 && serverList.length < localList.length) {
+    // Mescla dados do servidor com locais preservando todas as criações sem perda de campos
+    const mergedMap = new Map<string, FuncionarioWithTreinamentos>();
+
+    const getItemKey = (c: any, index: number) => {
+      if (!c) return '';
+      const mat = c.matricula !== undefined && c.matricula !== null ? String(c.matricula).trim().toLowerCase() : '';
+      const id = c.id !== undefined && c.id !== null ? String(c.id).trim().toLowerCase() : '';
+      return mat || id || `item-${index}`;
+    };
+
+    // 1. Coloca dados locais do navegador (mais recentes para o usuário ativo)
+    localList.forEach((c, idx) => {
+      const key = getItemKey(c, idx);
+      if (key) {
+        mergedMap.set(key, repairFuncionarioObject(c));
+      }
+    });
+
+    // 2. Mescla com dados do servidor Express
+    serverList.forEach((c, idx) => {
+      const key = getItemKey(c, idx);
+      if (key) {
+        if (!mergedMap.has(key)) {
+          mergedMap.set(key, repairFuncionarioObject(c));
+        } else {
+          const existing = mergedMap.get(key)!;
+          const trainExisting = Array.isArray(existing.treinamentos) ? existing.treinamentos : [];
+          const trainNew = Array.isArray(c.treinamentos) ? c.treinamentos : [];
+          mergedMap.set(key, repairFuncionarioObject({
+            ...c,
+            ...existing,
+            foto_url: existing.foto_url || c.foto_url || null,
+            treinamentos: (trainExisting.length >= trainNew.length ? trainExisting : trainNew).map(repairCourseObject),
+          }));
+        }
+      }
+    });
+
+    const merged = Array.from(mergedMap.values());
+
+    // Se houver dados locais/mesclados que ainda não estão no servidor, sincroniza-os em segundo plano
+    if (merged.length > 0) {
+      saveLocalStore(merged);
       try {
         fetch('/api/colaboradores/sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ colaboradores: localList }),
+          body: JSON.stringify({ colaboradores: merged }),
         }).catch(() => {});
       } catch {}
-    }
-
-    // Mescla dados do servidor com locais preservando todas as criações
-    const mergedMap = new Map<string, FuncionarioWithTreinamentos>();
-    for (const c of serverList) {
-      if (c && c.matricula) mergedMap.set(c.matricula.toLowerCase(), c);
-    }
-    for (const c of localList) {
-      if (c && c.matricula && !mergedMap.has(c.matricula.toLowerCase())) {
-        mergedMap.set(c.matricula.toLowerCase(), c);
-      }
-    }
-
-    const merged = Array.from(mergedMap.values());
-    if (merged.length > 0) {
-      saveLocalStore(merged);
       return merged;
     }
 
@@ -505,6 +621,13 @@ export const dbService = {
 
         const list = loadLocalStore();
         saveLocalStore([complete, ...list]);
+        try {
+          fetch('/api/colaboradores', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(complete),
+          }).catch(() => {});
+        } catch {}
         return complete;
       } catch (err) {
         console.warn('Erro ao inserir no Supabase, salvando localmente:', err);
