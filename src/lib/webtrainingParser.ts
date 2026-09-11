@@ -1,4 +1,5 @@
 import { WebtrainingParsedData, WebtrainingParsedCourse } from '../types';
+import { repairCorruptedText, repairCourseObject } from './textSanitizer';
 
 /**
  * Utilitário para extração e processamento de informações do Crachá da Universidade VLI (Webtraining)
@@ -30,7 +31,13 @@ export async function extractFromWebtrainingUrl(url: string): Promise<Webtrainin
     throw new Error(json.error || 'Falha ao extrair dados da Universidade VLI.');
   }
 
-  return json.data;
+  const rawData: WebtrainingParsedData = json.data;
+  return {
+    ...rawData,
+    nome: repairCorruptedText(rawData.nome),
+    cargo: repairCorruptedText(rawData.cargo),
+    cursos: (rawData.cursos || []).map(repairCourseObject),
+  };
 }
 
 /**
@@ -123,23 +130,25 @@ export function parseWebtrainingHtml(html: string): WebtrainingParsedData {
         statusGeral = 'vencido';
       }
 
-      cursos.push({
-        nome_curso: atividade,
-        categoria,
-        vencimento_treinamento: vencimentoTrein,
-        vencimento_aso: vencimentoAso,
-        status_webtraining: statusWeb,
-        status: statusGeral,
-        data_validade: dataValidadeISO,
-        origem: 'universidade_vli',
-      });
+      cursos.push(
+        repairCourseObject({
+          nome_curso: repairCorruptedText(atividade),
+          categoria: repairCorruptedText(categoria),
+          vencimento_treinamento: repairCorruptedText(vencimentoTrein),
+          vencimento_aso: repairCorruptedText(vencimentoAso),
+          status_webtraining: repairCorruptedText(statusWeb),
+          status: statusGeral,
+          data_validade: dataValidadeISO,
+          origem: 'universidade_vli',
+        })
+      );
     }
   }
 
   return {
-    nome,
+    nome: repairCorruptedText(nome),
     matricula,
-    cargo,
+    cargo: repairCorruptedText(cargo),
     cursos,
     totalCursos: cursos.length,
     fonte: 'Universidade VLi (Webtraining)',

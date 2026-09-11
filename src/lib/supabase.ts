@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Funcionario, Treinamento, FuncionarioWithTreinamentos, AdminUser } from '../types';
+import { repairFuncionarioObject, repairCourseObject } from './textSanitizer';
 
 /**
  * Módulo de Banco de Dados, Autenticação e Persistência VLI
@@ -74,7 +75,7 @@ export const loadLocalStore = (): FuncionarioWithTreinamentos[] => {
     if (!Array.isArray(parsed)) {
       return [];
     }
-    return parsed;
+    return parsed.map(repairFuncionarioObject);
   } catch (e) {
     console.error('Erro ao ler colaboradores locais:', e);
     return [];
@@ -321,10 +322,12 @@ export const dbService = {
 
         if (trainError) throw trainError;
 
-        const combined: FuncionarioWithTreinamentos[] = (funcData || []).map((f: Funcionario) => ({
-          ...f,
-          treinamentos: (trainData || []).filter((t: Treinamento) => t.funcionario_id === f.id),
-        }));
+        const combined: FuncionarioWithTreinamentos[] = (funcData || []).map((f: Funcionario) =>
+          repairFuncionarioObject({
+            ...f,
+            treinamentos: (trainData || []).filter((t: Treinamento) => t.funcionario_id === f.id),
+          })
+        );
 
         saveLocalStore(combined);
         return combined;
@@ -340,7 +343,7 @@ export const dbService = {
       if (res.ok) {
         const json = await res.json();
         if (json.success && Array.isArray(json.data)) {
-          serverList = json.data;
+          serverList = json.data.map(repairFuncionarioObject);
         }
       }
     } catch {}
@@ -393,12 +396,13 @@ export const dbService = {
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.data) {
+          const repaired = repairFuncionarioObject(json.data);
           const current = loadLocalStore();
-          const exists = current.some((c) => c.id === json.data.id || c.matricula === json.data.matricula);
+          const exists = current.some((c) => c.id === repaired.id || c.matricula === repaired.matricula);
           if (!exists) {
-            saveLocalStore([json.data, ...current]);
+            saveLocalStore([repaired, ...current]);
           }
-          return json.data;
+          return repaired;
         }
       }
     } catch {
@@ -423,10 +427,10 @@ export const dbService = {
             .select('*')
             .eq('funcionario_id', func.id);
 
-          return {
+          return repairFuncionarioObject({
             ...func,
-            treinamentos: trainings || [],
-          };
+            treinamentos: (trainings || []).map(repairCourseObject),
+          });
         }
       } catch (err) {
         console.warn('Aviso: Utilizando busca local de colaborador:', err);
@@ -444,7 +448,7 @@ export const dbService = {
       return matchId || matchMatricula || matchClean;
     });
 
-    return found || null;
+    return found ? repairFuncionarioObject(found) : null;
   },
 
   /**

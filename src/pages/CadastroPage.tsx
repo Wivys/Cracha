@@ -20,6 +20,7 @@ import {
 import { dbService } from '../lib/supabase';
 import { VliAvatar } from '../components/VliAvatar';
 import { extractFromWebtrainingUrl } from '../lib/webtrainingParser';
+import { repairCorruptedText, repairFuncionarioObject } from '../lib/textSanitizer';
 
 interface CadastroPageProps {
   editingEmployee?: FuncionarioWithTreinamentos | null;
@@ -94,31 +95,32 @@ export const CadastroPage: React.FC<CadastroPageProps> = ({
   // Carrega catálogo dinâmico de cursos previamente cadastrados
   useEffect(() => {
     dbService.getCatalogoCursos().then((list) => {
-      setCatalogoCursos(list || []);
+      setCatalogoCursos((list || []).map(repairCorruptedText));
     });
   }, []);
 
   // Inicialização no modo de edição ou novo cadastro
   useEffect(() => {
     if (editingEmployee) {
-      setNome(editingEmployee.nome);
-      setMatricula(editingEmployee.matricula);
-      setCargo(editingEmployee.cargo || 'Operador Ferroviário / Logística');
-      setUnidade(editingEmployee.unidade || 'Corredor Centro-Leste');
-      setFotoUrl(editingEmployee.foto_url);
-      setGenero(editingEmployee.genero === 'M' ? 'M' : 'H');
+      const repaired = repairFuncionarioObject(editingEmployee);
+      setNome(repaired.nome);
+      setMatricula(repaired.matricula);
+      setCargo(repaired.cargo || 'Operador Ferroviário / Logística');
+      setUnidade(repaired.unidade || 'Corredor Centro-Leste');
+      setFotoUrl(repaired.foto_url);
+      setGenero(repaired.genero === 'M' ? 'M' : 'H');
       setTrainings(
-        (editingEmployee.treinamentos || []).map((t, idx) => ({
+        (repaired.treinamentos || []).map((t, idx) => ({
           id: t.id || String(idx),
-          nome_curso: t.nome_curso,
+          nome_curso: repairCorruptedText(t.nome_curso),
           data_validade: t.data_validade,
           status: t.status,
           carga_horaria: t.carga_horaria,
           origem: t.origem || 'manual',
-          categoria: t.categoria,
-          vencimento_treinamento: t.vencimento_treinamento,
-          vencimento_aso: t.vencimento_aso,
-          status_webtraining: t.status_webtraining,
+          categoria: repairCorruptedText(t.categoria),
+          vencimento_treinamento: repairCorruptedText(t.vencimento_treinamento),
+          vencimento_aso: repairCorruptedText(t.vencimento_aso),
+          status_webtraining: repairCorruptedText(t.status_webtraining),
         }))
       );
     } else {
@@ -319,22 +321,22 @@ export const CadastroPage: React.FC<CadastroPageProps> = ({
     try {
       const result = await dbService.saveFuncionarioComTreinamentos({
         id: editingEmployee?.id,
-        nome: nome.trim().toUpperCase(),
+        nome: repairCorruptedText(nome.trim().toUpperCase()),
         matricula: matricula.trim(),
-        cargo: cargo.trim() || editingEmployee?.cargo || 'Operador Ferroviário / Logística',
-        unidade: unidade.trim() || editingEmployee?.unidade || 'Corredor Centro-Leste',
+        cargo: repairCorruptedText(cargo.trim() || editingEmployee?.cargo || 'Operador Ferroviário / Logística'),
+        unidade: repairCorruptedText(unidade.trim() || editingEmployee?.unidade || 'Corredor Centro-Leste'),
         foto_url: fotoUrl,
         genero,
         treinamentos: trainings.map((t) => ({
-          nome_curso: t.nome_curso,
+          nome_curso: repairCorruptedText(t.nome_curso),
           data_validade: t.data_validade,
           status: t.status,
           carga_horaria: t.carga_horaria || '40h',
           origem: t.origem || 'manual',
-          categoria: t.categoria,
-          vencimento_treinamento: t.vencimento_treinamento,
-          vencimento_aso: t.vencimento_aso,
-          status_webtraining: t.status_webtraining,
+          categoria: repairCorruptedText(t.categoria),
+          vencimento_treinamento: repairCorruptedText(t.vencimento_treinamento),
+          vencimento_aso: repairCorruptedText(t.vencimento_aso),
+          status_webtraining: repairCorruptedText(t.status_webtraining),
         })),
       });
 

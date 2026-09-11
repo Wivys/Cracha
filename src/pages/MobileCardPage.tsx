@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { FuncionarioWithTreinamentos } from '../types';
 import { dbService } from '../lib/supabase';
+import { repairFuncionarioObject } from '../lib/textSanitizer';
 import { QrCodeDisplay } from '../components/QrCodeDisplay';
 import { VliLogo } from '../components/VliLogo';
 import { VliAvatar } from '../components/VliAvatar';
@@ -207,7 +208,7 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
       try {
         const found = await dbService.getFuncionarioByIdOrMatricula(matriculaOrId);
         if (found) {
-          setEmployee(found);
+          setEmployee(repairFuncionarioObject(found));
         } else {
           setError(`Colaborador com identificação "${matriculaOrId}" não encontrado.`);
         }

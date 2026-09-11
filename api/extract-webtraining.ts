@@ -1,3 +1,5 @@
+import { decodeHtmlBuffer, repairCorruptedText, repairCourseObject } from '../src/lib/textSanitizer';
+
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     return res.status(405).json({ success: false, error: 'Método não permitido. Use POST.' });
@@ -36,7 +38,10 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    const html = await response.text();
+    // Decodifica o buffer binário preservando a codificação ISO-8859-1 / Windows-1252 do Webtraining
+    const buffer = await response.arrayBuffer();
+    const contentType = response.headers.get('content-type') || '';
+    const html = decodeHtmlBuffer(buffer, contentType);
 
     // 1. Extração do Nome
     let nome = '';
@@ -45,7 +50,7 @@ export default async function handler(req: any, res: any) {
       html.match(/<h2[^>]*>Crach[áa]<\/h2>[\s\S]*?<span>([^<]+)<\/span>/i) ||
       html.match(/<strong>Crach[áa]<\/strong><\/h2>[\s\S]*?<p>[\s\S]*?<span>([^<]+)<\/span>/i);
     if (nomeMatch && nomeMatch[1]) {
-      nome = nomeMatch[1].trim();
+      nome = repairCorruptedText(nomeMatch[1].trim());
     }
 
     // 2. Extração de Matrícula / ID
@@ -63,7 +68,7 @@ export default async function handler(req: any, res: any) {
       html.match(/<span>Cargo:\s*([^<]+)<\/span>/i) ||
       html.match(/Cargo:\s*([^<\n\r]+)/i);
     if (cargoMatch && cargoMatch[1]) {
-      cargo = cargoMatch[1].trim();
+      cargo = repairCorruptedText(cargoMatch[1].trim());
     }
 
     // 4. Extração dos Cursos da tabela
@@ -87,11 +92,11 @@ export default async function handler(req: any, res: any) {
       }
 
       if (tds.length >= 4) {
-        const categoria = tds[0] || 'Requisitos Legais';
-        const atividade = tds[1] || '';
-        const vencimentoTrein = tds[2] || 'Não aplicável';
-        const vencimentoAso = tds[3] || 'Não aplicável';
-        const statusWeb = tds[4] || 'Liberado';
+        const categoria = repairCorruptedText(tds[0] || 'Requisitos Legais');
+        const atividade = repairCorruptedText(tds[1] || '');
+        const vencimentoTrein = repairCorruptedText(tds[2] || 'Não aplicável');
+        const vencimentoAso = repairCorruptedText(tds[3] || 'Não aplicável');
+        const statusWeb = repairCorruptedText(tds[4] || 'Liberado');
 
         if (!atividade) continue;
 
@@ -114,16 +119,18 @@ export default async function handler(req: any, res: any) {
           statusGeral = 'vencido';
         }
 
-        cursos.push({
-          nome_curso: atividade,
-          categoria,
-          vencimento_treinamento: vencimentoTrein,
-          vencimento_aso: vencimentoAso,
-          status_webtraining: statusWeb,
-          status: statusGeral,
-          data_validade: dataValidadeISO,
-          origem: 'universidade_vli',
-        });
+        cursos.push(
+          repairCourseObject({
+            nome_curso: atividade,
+            categoria,
+            vencimento_treinamento: vencimentoTrein,
+            vencimento_aso: vencimentoAso,
+            status_webtraining: statusWeb,
+            status: statusGeral,
+            data_validade: dataValidadeISO,
+            origem: 'universidade_vli',
+          })
+        );
       }
     }
 

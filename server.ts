@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
+import { decodeHtmlBuffer, repairCorruptedText, repairCourseObject } from './src/lib/textSanitizer';
 
 /**
  * Servidor Express integrado com Vite e rotas de API com persistência
@@ -242,17 +243,10 @@ async function startServer() {
         }
 
         const buffer = await fetchResponse.arrayBuffer();
-        const decoderUtf8 = new TextDecoder('utf-8');
-        let decodedText = decoderUtf8.decode(buffer);
-
-        if (decodedText.includes('') || decodedText.includes('Crach')) {
-          const decoderLatin = new TextDecoder('iso-8859-1');
-          decodedText = decoderLatin.decode(buffer);
-        }
-
-        html = decodedText;
+        const contentType = fetchResponse.headers.get('content-type') || '';
+        html = decodeHtmlBuffer(buffer, contentType);
       } else if (htmlContent && typeof htmlContent === 'string') {
-        html = htmlContent;
+        html = repairCorruptedText(htmlContent);
       } else {
         return res.status(400).json({
           success: false,
@@ -270,7 +264,7 @@ async function startServer() {
         html.match(/<h2[^>]*>Crach[áa]<\/h2>[\s\S]*?<span>([^<]+)<\/span>/i) ||
         html.match(/<strong>Crach[áa]<\/strong><\/h2>[\s\S]*?<p>[\s\S]*?<span>([^<]+)<\/span>/i);
       if (nomeMatch && nomeMatch[1]) {
-        nome = nomeMatch[1].trim();
+        nome = repairCorruptedText(nomeMatch[1].trim());
       }
 
       const idMatch =
@@ -284,7 +278,7 @@ async function startServer() {
         html.match(/<span>Cargo:\s*([^<]+)<\/span>/i) ||
         html.match(/Cargo:\s*([^<\n\r]+)/i);
       if (cargoMatch && cargoMatch[1]) {
-        cargo = cargoMatch[1].trim();
+        cargo = repairCorruptedText(cargoMatch[1].trim());
       }
 
       // Extração das Atividades / Cursos da tabela #tabelaCracha
@@ -318,11 +312,11 @@ async function startServer() {
         }
 
         if (tds.length >= 4) {
-          const categoria = tds[0] || 'Requisitos Legais';
-          const atividade = tds[1] || '';
-          const vencimentoTrein = tds[2] || 'Não aplicável';
-          const vencimentoAso = tds[3] || 'Não aplicável';
-          const statusWeb = tds[4] || 'Liberado';
+          const categoria = repairCorruptedText(tds[0] || 'Requisitos Legais');
+          const atividade = repairCorruptedText(tds[1] || '');
+          const vencimentoTrein = repairCorruptedText(tds[2] || 'Não aplicável');
+          const vencimentoAso = repairCorruptedText(tds[3] || 'Não aplicável');
+          const statusWeb = repairCorruptedText(tds[4] || 'Liberado');
 
           if (!atividade) continue;
 
@@ -350,16 +344,18 @@ async function startServer() {
             statusGeral = 'vencido';
           }
 
-          cursos.push({
-            nome_curso: atividade,
-            categoria,
-            vencimento_treinamento: vencimentoTrein,
-            vencimento_aso: vencimentoAso,
-            status_webtraining: statusWeb,
-            status: statusGeral,
-            data_validade: dataValidadeISO,
-            origem: 'universidade_vli',
-          });
+          cursos.push(
+            repairCourseObject({
+              nome_curso: atividade,
+              categoria,
+              vencimento_treinamento: vencimentoTrein,
+              vencimento_aso: vencimentoAso,
+              status_webtraining: statusWeb,
+              status: statusGeral,
+              data_validade: dataValidadeISO,
+              origem: 'universidade_vli',
+            })
+          );
         }
       }
 
