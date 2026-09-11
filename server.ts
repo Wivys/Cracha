@@ -266,10 +266,17 @@ async function startServer() {
               'User-Agent':
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
               Accept:
-                'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
               'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-              'Cache-Control': 'no-cache',
-              Pragma: 'no-cache',
+              'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+              'Sec-Ch-Ua-Mobile': '?0',
+              'Sec-Ch-Ua-Platform': '"Windows"',
+              'Sec-Fetch-Dest': 'document',
+              'Sec-Fetch-Mode': 'navigate',
+              'Sec-Fetch-Site': 'none',
+              'Sec-Fetch-User': '?1',
+              'Upgrade-Insecure-Requests': '1',
+              'Cache-Control': 'max-age=0',
               Referer: 'https://universidadevli.webtraining.com.br/',
             },
           });
@@ -333,16 +340,18 @@ async function startServer() {
       const nomeMatch =
         html.match(/<span>([A-ZÀ-Ú\s]{3,})<\/span>/i) ||
         html.match(/<h2[^>]*>Crach[áa]<\/h2>[\s\S]*?<span>([^<]+)<\/span>/i) ||
-        html.match(/<strong>Crach[áa]<\/strong><\/h2>[\s\S]*?<p>[\s\S]*?<span>([^<]+)<\/span>/i);
+        html.match(/<strong>Crach[áa]<\/strong><\/h2>[\s\S]*?<p>[\s\S]*?<span>([^<]+)<\/span>/i) ||
+        html.match(/Nome:\s*([A-ZÀ-Úa-z\s]{3,})/i);
       if (nomeMatch && nomeMatch[1]) {
-        nome = repairCorruptedText(nomeMatch[1].trim());
+        nome = repairCorruptedText(nomeMatch[1].replace(/Nome:\s*/i, '').trim());
       }
 
       const idMatch =
         html.match(/<span>ID:\s*([0-9A-Za-z\-_]+)<\/span>/i) ||
-        html.match(/ID:\s*([0-9A-Za-z\-_]+)/i);
+        html.match(/ID:\s*([0-9A-Za-z\-_]+)/i) ||
+        html.match(/Matr[íi]cula:\s*([0-9A-Za-z\-_]+)/i);
       if (idMatch && idMatch[1]) {
-        matricula = idMatch[1].trim();
+        matricula = idMatch[1].replace(/Matr[íi]cula:\s*/i, '').replace(/ID:\s*/i, '').trim();
       }
 
       const cargoMatch =
