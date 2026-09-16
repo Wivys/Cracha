@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Funcionario, Treinamento, FuncionarioWithTreinamentos, AdminUser } from '../types';
 import { repairFuncionarioObject, repairCourseObject } from './textSanitizer';
+import { extractBadgeFromCurrentUrl, decodeBadgeToken } from './portableBadge';
 
 /**
  * Módulo de Banco de Dados, Autenticação e Persistência VLI
@@ -554,22 +555,84 @@ export const dbService = {
 
   /**
    * Busca um colaborador por ID ou Matrícula
-   * - Consulta o servidor para permitir que qualquer celular/QR Code visualize o crachá
+   * - Suporta decodificação de token portátil compartilhado via link (?d=...)
+   * - Consulta cache local do navegador
+   * - Consulta o servidor Vercel / Express via path e query params
+   * - Consulta Supabase (se configurado)
    */
   async getFuncionarioByIdOrMatricula(
     idOrMatricula: string
   ): Promise<FuncionarioWithTreinamentos | null> {
     const query = idOrMatricula.trim().toLowerCase();
 
-    // 1. Tentar buscar no servidor primeiro (QR Code lido no celular de qualquer pessoa)
+    // 0. Tenta extrair crachá portátil direto da URL ativa (?d= ou #d=)
+    const fromUrl = extractBadgeFromCurrentUrl();
+    if (fromUrl) {
+      const repaired = repairFuncionarioObject(fromUrl);
+      const current = loadLocalStore();
+      const exists = current.some(
+        (c) => c.id === repaired.id || String(c.matricula).toLowerCase() === String(repaired.matricula).toLowerCase()
+      );
+      if (!exists) {
+        saveLocalStore([repaired, ...current]);
+      }
+      // Notifica o servidor em segundo plano para persistir para consultas curtas futuras
+      try {
+        fetch('/api/colaboradores', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(repaired),
+        }).catch(() => {});
+      } catch {}
+
+      return repaired;
+    }
+
+    // Se o próprio parâmetro for um token longo
+    if (idOrMatricula.length > 50) {
+      const decoded = decodeBadgeToken(idOrMatricula);
+      if (decoded) {
+        const repaired = repairFuncionarioObject(decoded);
+        const current = loadLocalStore();
+        const exists = current.some(
+          (c) => c.id === repaired.id || String(c.matricula).toLowerCase() === String(repaired.matricula).toLowerCase()
+        );
+        if (!exists) {
+          saveLocalStore([repaired, ...current]);
+        }
+        return repaired;
+      }
+    }
+
+    // 1. Consulta rápida no armazenamento local do navegador
+    const localList = loadLocalStore();
+    const foundLocal = localList.find((f) => {
+      const matchId = (f.id || '').toLowerCase() === query;
+      const matchMatricula = (f.matricula || '').toLowerCase() === query;
+      const cleanDigitsF = (f.matricula || '').replace(/\D/g, '');
+      const cleanDigitsQ = query.replace(/\D/g, '');
+      const matchClean = cleanDigitsF && cleanDigitsQ && cleanDigitsF === cleanDigitsQ;
+      return matchId || matchMatricula || matchClean;
+    });
+
+    if (foundLocal) {
+      return repairFuncionarioObject(foundLocal);
+    }
+
+    // 2. Consulta no servidor (/api/colaboradores via caminho e query param)
     try {
-      const res = await fetch(`/api/colaboradores/${encodeURIComponent(query)}`);
+      let res = await fetch(`/api/colaboradores/${encodeURIComponent(query)}`);
+      if (!res.ok) {
+        res = await fetch(`/api/colaboradores?idOrMatricula=${encodeURIComponent(query)}`);
+      }
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.data) {
           const repaired = repairFuncionarioObject(json.data);
           const current = loadLocalStore();
-          const exists = current.some((c) => c.id === repaired.id || c.matricula === repaired.matricula);
+          const exists = current.some(
+            (c) => c.id === repaired.id || String(c.matricula).toLowerCase() === String(repaired.matricula).toLowerCase()
+          );
           if (!exists) {
             saveLocalStore([repaired, ...current]);
           }
@@ -580,7 +643,7 @@ export const dbService = {
       // Ignora falhas de rede e segue para as opções seguintes
     }
 
-    // 2. Consulta no Supabase se configurado
+    // 3. Consulta no Supabase se configurado
     const supabase = getSupabase();
     if (supabase) {
       try {
@@ -598,28 +661,27 @@ export const dbService = {
             .select('*')
             .eq('funcionario_id', func.id);
 
-          return repairFuncionarioObject({
+          const repaired = repairFuncionarioObject({
             ...func,
             treinamentos: (trainings || []).map(repairCourseObject),
           });
+
+          const current = loadLocalStore();
+          const exists = current.some(
+            (c) => c.id === repaired.id || String(c.matricula).toLowerCase() === String(repaired.matricula).toLowerCase()
+          );
+          if (!exists) {
+            saveLocalStore([repaired, ...current]);
+          }
+
+          return repaired;
         }
       } catch (err) {
         console.warn('Aviso: Utilizando busca local de colaborador:', err);
       }
     }
 
-    // 3. Fallback: busca no armazenamento local do navegador
-    const localList = loadLocalStore();
-    const found = localList.find((f) => {
-      const matchId = (f.id || '').toLowerCase() === query;
-      const matchMatricula = (f.matricula || '').toLowerCase() === query;
-      const cleanDigitsF = (f.matricula || '').replace(/\D/g, '');
-      const cleanDigitsQ = query.replace(/\D/g, '');
-      const matchClean = cleanDigitsF && cleanDigitsQ && cleanDigitsF === cleanDigitsQ;
-      return matchId || matchMatricula || matchClean;
-    });
-
-    return found ? repairFuncionarioObject(found) : null;
+    return null;
   },
 
   /**

@@ -20,6 +20,7 @@ import {
   FilterStatus,
 } from '../types';
 import { dbService, loadLocalStore } from '../lib/supabase';
+import { buildShareableBadgeUrl } from '../lib/portableBadge';
 
 interface GaleriaCardsPageProps {
   employees: FuncionarioWithTreinamentos[];
@@ -152,7 +153,7 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
 
   // Action: Copiar Link (ícone de globo)
   const handleCopyLink = async (emp: FuncionarioWithTreinamentos) => {
-    const url = `${window.location.origin}/card/${emp.matricula || emp.id}`;
+    const url = buildShareableBadgeUrl(emp);
     try {
       await navigator.clipboard.writeText(url);
       setCopiedId(emp.id);

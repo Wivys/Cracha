@@ -37,7 +37,7 @@ export const QrCodeDisplay: React.FC<QrCodeDisplayProps> = ({
         dark: '#002B49', // VLI Navy Blue
         light: '#FFFFFF',
       },
-      errorCorrectionLevel: 'H',
+      errorCorrectionLevel: 'M',
     })
       .then((url) => {
         setDataUrl(url);

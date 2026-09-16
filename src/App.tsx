@@ -8,6 +8,7 @@ import { QrScannerModal } from './components/QrScannerModal';
 import { SupabaseSettingsModal } from './components/SupabaseSettingsModal';
 import { AdminUser, FuncionarioWithTreinamentos } from './types';
 import { dbService } from './lib/supabase';
+import { extractBadgeFromCurrentUrl } from './lib/portableBadge';
 import { ShieldCheck } from 'lucide-react';
 
 type ViewMode = 'login' | 'admin_galeria' | 'admin_cadastro' | 'mobile_card';
@@ -64,15 +65,28 @@ export default function App() {
     const hash = window.location.hash;
     const params = new URLSearchParams(window.location.search);
 
-    const cardParam = params.get('card');
+    // 0. Verifica se há um crachá portátil serializado na URL (?d= ou ?data= ou #d=)
+    const portableEmp = extractBadgeFromCurrentUrl();
+    if (portableEmp) {
+      setActiveCardIdOrMatricula(portableEmp.matricula || portableEmp.id);
+      setCurrentView('mobile_card');
+      return;
+    }
+
+    const cardParam =
+      params.get('card') ||
+      params.get('matricula') ||
+      params.get('id') ||
+      params.get('cracha');
     if (cardParam) {
       setActiveCardIdOrMatricula(cardParam);
       setCurrentView('mobile_card');
       return;
     }
 
-    if (path.startsWith('/card/')) {
-      const id = path.replace('/card/', '').split('/')[0];
+    if (path.startsWith('/card/') || path.startsWith('/cracha/')) {
+      const prefix = path.startsWith('/card/') ? '/card/' : '/cracha/';
+      const id = path.replace(prefix, '').split('/')[0];
       if (id) {
         setActiveCardIdOrMatricula(decodeURIComponent(id));
         setCurrentView('mobile_card');
@@ -80,8 +94,9 @@ export default function App() {
       }
     }
 
-    if (hash.startsWith('#card/')) {
-      const id = hash.replace('#card/', '').split('?')[0];
+    if (hash.startsWith('#card/') || hash.startsWith('#cracha/')) {
+      const prefix = hash.startsWith('#card/') ? '#card/' : '#cracha/';
+      const id = hash.replace(prefix, '').split('?')[0];
       if (id) {
         setActiveCardIdOrMatricula(decodeURIComponent(id));
         setCurrentView('mobile_card');
