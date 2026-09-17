@@ -63,7 +63,6 @@ export const getSupabase = (): SupabaseClient | null => {
 
 // Chaves de armazenamento local para produção limpa
 const LOCAL_STORAGE_KEY = 'vli_database_colaboradores_prod_v1';
-const ADMIN_MASTER_KEY = 'vli_admin_master_credential_v1';
 const ADMIN_SESSION_KEY = 'vli_admin_session_active_v1';
 
 // Chaves legadas para recuperação de crachás criados anteriormente
@@ -78,12 +77,6 @@ const LEGACY_STORAGE_KEYS = [
   'vli_employees',
 ];
 
-interface MasterAdminCredential {
-  usuario: string;
-  senhaHash: string;
-  nome: string;
-  registeredAt: string;
-}
 
 /**
  * Lê os colaboradores cadastrados localmente (com suporte a recuperação e migração de chaves legadas)
@@ -241,26 +234,20 @@ export function toSafeDateForSupabase(dateStr?: string | null): string {
  */
 export const dbService = {
   /**
-   * Verifica se já existe um Administrador Definitivo cadastrado no sistema (localmente e no servidor)
+   * Checagem se o sistema possui conexão ou administradores cadastrados
    */
   hasRegisteredAdmin(): boolean {
-    try {
-      const raw = localStorage.getItem(ADMIN_MASTER_KEY);
-      return Boolean(raw && JSON.parse(raw)?.usuario);
-    } catch {
-      return false;
-    }
+    return false;
   },
 
   /**
-   * Checagem assíncrona que sincroniza e valida o status com o servidor e Supabase
+   * Checagem assíncrona se há administradores registrados no Supabase
    */
   async checkHasRegisteredAdminAsync(): Promise<{ hasAdmin: boolean; info?: { usuario: string; nome: string; registeredAt: string } | null }> {
-    // 1. Checagem direta no Supabase (se configurado)
     const supabase = getSupabase();
     if (supabase) {
       try {
-        // Verifica tabela 'vli_admin'
+        // 1. Tabela 'vli_admin'
         const { data: vliData } = await supabase.from('vli_admin').select('usuario, nome, created_at').limit(1);
         if (vliData && vliData.length > 0) {
           return {
@@ -273,7 +260,7 @@ export const dbService = {
           };
         }
 
-        // Verifica tabela 'administradores'
+        // 2. Tabela 'administradores'
         const { data: admData } = await supabase.from('administradores').select('usuario, nome, created_at').limit(1);
         if (admData && admData.length > 0) {
           return {
@@ -286,346 +273,115 @@ export const dbService = {
           };
         }
       } catch {
-        // Tabela ainda não existente no Supabase, segue fluxo normal
+        // Tabela ainda não existente no Supabase
       }
     }
 
-    // 2. Checagem no Servidor Express
-    try {
-      const res = await fetch('/api/admin/info');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.hasAdmin && data.info) {
-          // Se o servidor tem admin e o local ainda não tem o registro visual, salvamos o indicador
-          const localRaw = localStorage.getItem(ADMIN_MASTER_KEY);
-          if (!localRaw) {
-            localStorage.setItem(
-              ADMIN_MASTER_KEY,
-              JSON.stringify({
-                usuario: data.info.usuario,
-                nome: data.info.nome,
-                senhaHash: '',
-                registeredAt: data.info.registeredAt,
-              })
-            );
-          }
-          return { hasAdmin: true, info: data.info };
-        }
-      }
-    } catch {
-      // Falha de rede, recorre ao armazenamento local
-    }
-
-    // 3. Fallback local
-    const hasLocal = this.hasRegisteredAdmin();
-    const info = this.getRegisteredAdminInfo();
-
-    // Se temos admin local mas o servidor talvez não saiba ainda, enviamos em segundo plano
-    if (hasLocal) {
-      try {
-        const rawLocal = localStorage.getItem(ADMIN_MASTER_KEY);
-        if (rawLocal) {
-          fetch('/api/admin/sync-master', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ master: JSON.parse(rawLocal) }),
-          }).catch(() => {});
-        }
-      } catch {}
-    }
-
-    return { hasAdmin: hasLocal, info };
+    return { hasAdmin: false, info: null };
   },
 
   /**
-   * Retorna os dados públicos do administrador cadastrado (sem a senha)
-   */
-  getRegisteredAdminInfo(): { usuario: string; nome: string; registeredAt: string } | null {
-    try {
-      const raw = localStorage.getItem(ADMIN_MASTER_KEY);
-      if (!raw) return null;
-      const parsed: MasterAdminCredential = JSON.parse(raw);
-      return {
-        usuario: parsed.usuario,
-        nome: parsed.nome,
-        registeredAt: parsed.registeredAt,
-      };
-    } catch {
-      return null;
-    }
-  },
-
-  /**
-   * Cadastra o primeiro administrador definitivo do sistema.
-   * REGRA: Apenas 1 conta pode ser criada. Se já houver uma, bloqueia.
-   */
-  async registerDefinitiveAdmin(usuario: string, senha: string, nome?: string): Promise<AdminUser> {
-    const cleanUser = usuario.trim();
-    const cleanNome = nome?.trim() || 'Administrador VLI';
-    const nowIso = new Date().toISOString();
-
-    // 1. Tentar registrar no servidor primeiro para garantir a unicidade absoluta
-    try {
-      const resp = await fetch('/api/admin/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ usuario: cleanUser, senha, nome: cleanNome }),
-      });
-
-      if (!resp.ok) {
-        const errData = await resp.json().catch(() => ({}));
-        throw new Error(errData.error || 'Não é permitido criar outra conta de administrador.');
-      }
-    } catch (apiErr: any) {
-      if (apiErr.message && apiErr.message.includes('Já existe um administrador')) {
-        throw apiErr;
-      }
-      // Se for falha de rede/offline, continua e salva localmente
-    }
-
-    // 2. Se o Supabase estiver conectado, tenta sincronizar na tabela 'vli_admin'
-    const supabase = getSupabase();
-    if (supabase) {
-      try {
-        await supabase.from('vli_admin').insert([
-          {
-            usuario: cleanUser,
-            senha: senha,
-            nome: cleanNome,
-            created_at: nowIso,
-          },
-        ]);
-      } catch {
-        // Silencioso se a tabela ainda não tiver sido criada manualmente no Supabase
-      }
-    }
-
-    const masterCred: MasterAdminCredential = {
-      usuario: cleanUser,
-      senhaHash: senha, // Armazenado no cofre local da aplicação
-      nome: cleanNome,
-      registeredAt: nowIso,
-    };
-
-    localStorage.setItem(ADMIN_MASTER_KEY, JSON.stringify(masterCred));
-
-    const userSession: AdminUser = {
-      id: `admin-${Date.now()}`,
-      email: cleanUser.includes('@') ? cleanUser : `${cleanUser}@vli-logistica.com.br`,
-      nome: cleanNome,
-      role: 'admin',
-      definitive: true,
-      registeredAt: nowIso,
-    };
-
-    localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(userSession));
-    return userSession;
-  },
-
-  /**
-   * Realiza login administrativo.
-   * Suporta autenticação via Supabase (tabela vli_admin, administradores ou Supabase Auth),
-   * Servidor Express e armazenamento seguro local.
+   * Realiza login administrativo EXCLUSIVAMENTE via Supabase.
+   * Não há adição ou cadastro automático de senhas pelo site.
+   * A conta e a senha do Administrador devem ser criadas e gerenciadas no Supabase.
    */
   async loginAdmin(
     usuario: string,
     senha: string
-  ): Promise<{ success: boolean; user?: AdminUser; error?: string; isFirstAdminRegistered?: boolean }> {
+  ): Promise<{ success: boolean; user?: AdminUser; error?: string }> {
     const cleanUser = usuario.trim();
     if (!cleanUser || !senha) {
       return { success: false, error: 'Preencha o usuário e a senha.' };
     }
 
-    // 1. SUPABASE: Verifica se existe o Administrador cadastrado na nuvem Supabase
+    // Remove qualquer credencial legada antiga armazenada em versões anteriores
+    try {
+      localStorage.removeItem('vli_admin_master_credential_v1');
+    } catch {}
+
     const supabase = getSupabase();
-    if (supabase) {
-      try {
-        // A. Consulta na tabela 'vli_admin'
-        const { data: vliRows, error: vliErr } = await supabase
-          .from('vli_admin')
-          .select('*')
-          .ilike('usuario', cleanUser)
-          .limit(1);
-
-        if (!vliErr && vliRows && vliRows.length > 0) {
-          const row = vliRows[0];
-          const senhaEsperada = row.senha || row.password || row.senha_hash;
-          if (senhaEsperada && senhaEsperada === senha) {
-            const userSession: AdminUser = {
-              id: row.id ? String(row.id) : 'admin-supabase',
-              email: row.usuario.includes('@') ? row.usuario : `${row.usuario}@vli-logistica.com.br`,
-              nome: row.nome || 'Administrador VLI',
-              role: 'admin',
-              definitive: true,
-              registeredAt: row.created_at || new Date().toISOString(),
-            };
-            localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(userSession));
-            localStorage.setItem(
-              ADMIN_MASTER_KEY,
-              JSON.stringify({
-                usuario: row.usuario,
-                senhaHash: senha,
-                nome: row.nome || 'Administrador VLI',
-                registeredAt: row.created_at || new Date().toISOString(),
-              })
-            );
-            return { success: true, user: userSession };
-          } else {
-            return { success: false, error: 'Usuário ou senha incorretos.' };
-          }
-        }
-
-        // B. Consulta na tabela 'administradores'
-        const { data: admRows, error: admErr } = await supabase
-          .from('administradores')
-          .select('*')
-          .ilike('usuario', cleanUser)
-          .limit(1);
-
-        if (!admErr && admRows && admRows.length > 0) {
-          const row = admRows[0];
-          const senhaEsperada = row.senha || row.password || row.senha_hash;
-          if (senhaEsperada && senhaEsperada === senha) {
-            const userSession: AdminUser = {
-              id: row.id ? String(row.id) : 'admin-supabase',
-              email: row.usuario.includes('@') ? row.usuario : `${row.usuario}@vli-logistica.com.br`,
-              nome: row.nome || 'Administrador VLI',
-              role: 'admin',
-              definitive: true,
-              registeredAt: row.created_at || new Date().toISOString(),
-            };
-            localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(userSession));
-            localStorage.setItem(
-              ADMIN_MASTER_KEY,
-              JSON.stringify({
-                usuario: row.usuario,
-                senhaHash: senha,
-                nome: row.nome || 'Administrador VLI',
-                registeredAt: row.created_at || new Date().toISOString(),
-              })
-            );
-            return { success: true, user: userSession };
-          } else {
-            return { success: false, error: 'Usuário ou senha incorretos.' };
-          }
-        }
-
-        // C. Consulta no Supabase Auth nativo
-        try {
-          const emailToTry = cleanUser.includes('@') ? cleanUser : `${cleanUser}@vli-logistica.com.br`;
-          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email: emailToTry,
-            password: senha,
-          });
-          if (!authError && authData.user) {
-            const userSession: AdminUser = {
-              id: authData.user.id,
-              email: authData.user.email || emailToTry,
-              nome: authData.user.user_metadata?.nome || 'Administrador VLI',
-              role: 'admin',
-              definitive: true,
-              registeredAt: authData.user.created_at || new Date().toISOString(),
-            };
-            localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(userSession));
-            return { success: true, user: userSession };
-          }
-        } catch {}
-      } catch (sbErr) {
-        console.warn('Verificação Supabase Admin:', sbErr);
-      }
+    if (!supabase) {
+      return {
+        success: false,
+        error: 'Conexão com o Supabase necessária. Configure a URL e a chave de acesso.',
+      };
     }
 
-    // 2. SERVIDOR EXPRESS & LOCAL
-    let hasAdmin = this.hasRegisteredAdmin();
     try {
-      const serverCheck = await fetch('/api/admin/info');
-      if (serverCheck.ok) {
-        const serverData = await serverCheck.json();
-        if (serverData.hasAdmin) {
-          hasAdmin = true;
-        }
-      }
-    } catch {}
+      // A. Consulta na tabela 'vli_admin' criada no Supabase
+      const { data: vliRows, error: vliErr } = await supabase
+        .from('vli_admin')
+        .select('*')
+        .ilike('usuario', cleanUser)
+        .limit(1);
 
-    // PRIMEIRO ACESSO (se ainda não existir admin no sistema):
-    if (!hasAdmin) {
-      if (senha.length < 4) {
-        return {
-          success: false,
-          error: 'A senha deve ter no mínimo 4 caracteres.',
-        };
-      }
-
-      try {
-        const registeredUser = await this.registerDefinitiveAdmin(cleanUser, senha);
-        return {
-          success: true,
-          user: registeredUser,
-          isFirstAdminRegistered: true,
-        };
-      } catch (regErr: any) {
-        return {
-          success: false,
-          error: regErr.message || 'Erro ao registrar administrador.',
-        };
-      }
-    }
-
-    // ACESSOS POSTERIORES: Valida contra o Administrador Cadastrado no Servidor
-    try {
-      const srvLogin = await fetch('/api/admin/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ usuario: cleanUser, senha }),
-      });
-
-      if (srvLogin.ok) {
-        const srvData = await srvLogin.json();
-        if (srvData.success && srvData.user) {
-          localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(srvData.user));
-          return { success: true, user: srvData.user };
-        }
-      } else {
-        const srvErr = await srvLogin.json().catch(() => ({}));
-        if (srvLogin.status === 401 || srvLogin.status === 403) {
-          return {
-            success: false,
-            error: srvErr.error || 'Usuário ou senha incorretos.',
-          };
-        }
-      }
-    } catch {}
-
-    // Validação local de fallback
-    try {
-      const rawMaster = localStorage.getItem(ADMIN_MASTER_KEY);
-      if (rawMaster) {
-        const master: MasterAdminCredential = JSON.parse(rawMaster);
-
-        const userMatches =
-          master.usuario.toLowerCase() === cleanUser.toLowerCase() ||
-          master.usuario.toLowerCase().split('@')[0] === cleanUser.toLowerCase().split('@')[0];
-
-        const passwordMatches = master.senhaHash === senha;
-
-        if (userMatches && passwordMatches) {
+      if (!vliErr && vliRows && vliRows.length > 0) {
+        const row = vliRows[0];
+        const senhaEsperada = row.senha ?? row.password ?? row.senha_hash;
+        if (senhaEsperada && String(senhaEsperada) === String(senha)) {
           const userSession: AdminUser = {
-            id: 'admin-definitive',
-            email: master.usuario.includes('@')
-              ? master.usuario
-              : `${master.usuario}@vli-logistica.com.br`,
-            nome: master.nome,
+            id: row.id ? String(row.id) : 'admin-supabase',
+            email: row.usuario.includes('@') ? row.usuario : `${row.usuario}@vli-logistica.com.br`,
+            nome: row.nome || 'Administrador VLI',
             role: 'admin',
             definitive: true,
-            registeredAt: master.registeredAt,
+            registeredAt: row.created_at || new Date().toISOString(),
           };
+          localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(userSession));
+          return { success: true, user: userSession };
+        } else {
+          return { success: false, error: 'Usuário ou senha incorretos.' };
+        }
+      }
 
+      // B. Consulta na tabela 'administradores' (caso o usuário tenha criado com esse nome)
+      const { data: admRows, error: admErr } = await supabase
+        .from('administradores')
+        .select('*')
+        .ilike('usuario', cleanUser)
+        .limit(1);
+
+      if (!admErr && admRows && admRows.length > 0) {
+        const row = admRows[0];
+        const senhaEsperada = row.senha ?? row.password ?? row.senha_hash;
+        if (senhaEsperada && String(senhaEsperada) === String(senha)) {
+          const userSession: AdminUser = {
+            id: row.id ? String(row.id) : 'admin-supabase',
+            email: row.usuario.includes('@') ? row.usuario : `${row.usuario}@vli-logistica.com.br`,
+            nome: row.nome || 'Administrador VLI',
+            role: 'admin',
+            definitive: true,
+            registeredAt: row.created_at || new Date().toISOString(),
+          };
+          localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(userSession));
+          return { success: true, user: userSession };
+        } else {
+          return { success: false, error: 'Usuário ou senha incorretos.' };
+        }
+      }
+
+      // C. Consulta no Supabase Auth nativo (Authentication -> Users)
+      try {
+        const emailToTry = cleanUser.includes('@') ? cleanUser : `${cleanUser}@vli-logistica.com.br`;
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+          email: emailToTry,
+          password: senha,
+        });
+        if (!authError && authData.user) {
+          const userSession: AdminUser = {
+            id: authData.user.id,
+            email: authData.user.email || emailToTry,
+            nome: authData.user.user_metadata?.nome || 'Administrador VLI',
+            role: 'admin',
+            definitive: true,
+            registeredAt: authData.user.created_at || new Date().toISOString(),
+          };
           localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(userSession));
           return { success: true, user: userSession };
         }
-      }
-    } catch (e) {
-      console.error('Erro na validação do administrador:', e);
+      } catch {}
+    } catch (sbErr) {
+      console.warn('Erro ao consultar autenticação no Supabase:', sbErr);
     }
 
     return {
@@ -635,28 +391,13 @@ export const dbService = {
   },
 
   /**
-   * Altera a senha do administrador definitivo
+   * Altera a senha do administrador (desabilitado no site, exclusivo pelo Supabase)
    */
-  changeAdminPassword(senhaAtual: string, novaSenha: string): { success: boolean; error?: string } {
-    try {
-      const rawMaster = localStorage.getItem(ADMIN_MASTER_KEY);
-      if (!rawMaster) {
-        return { success: false, error: 'Nenhum administrador cadastrado.' };
-      }
-      const master: MasterAdminCredential = JSON.parse(rawMaster);
-      if (master.senhaHash !== senhaAtual) {
-        return { success: false, error: 'A senha atual informada está incorreta.' };
-      }
-      if (novaSenha.length < 4) {
-        return { success: false, error: 'A nova senha deve ter no mínimo 4 caracteres.' };
-      }
-
-      master.senhaHash = novaSenha;
-      localStorage.setItem(ADMIN_MASTER_KEY, JSON.stringify(master));
-      return { success: true };
-    } catch {
-      return { success: false, error: 'Falha ao atualizar a senha.' };
-    }
+  changeAdminPassword(): { success: boolean; error?: string } {
+    return {
+      success: false,
+      error: 'A gestão e troca de senhas deve ser feita diretamente no Supabase.',
+    };
   },
 
   /**

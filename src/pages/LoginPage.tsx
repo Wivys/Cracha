@@ -22,10 +22,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   onOpenQrScanner,
   onOpenSupabaseModal,
 }) => {
-  // Estado para detecção de primeiro acesso do administrador
-  const [hasMasterAdmin, setHasMasterAdmin] = useState(false);
-  const [adminInfo, setAdminInfo] = useState<{ usuario: string; nome: string } | null>(null);
-
   // Estados do formulário administrativo
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
@@ -40,24 +36,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   // Estados do acesso por link direto
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [directLinkInput, setDirectLinkInput] = useState('');
-
-  // Verifica se já existe um administrador permanente cadastrado (local e servidor)
-  useEffect(() => {
-    // 1. Verificação síncrona imediata
-    const isRegistered = dbService.hasRegisteredAdmin();
-    setHasMasterAdmin(isRegistered);
-    if (isRegistered) {
-      setAdminInfo(dbService.getRegisteredAdminInfo());
-    }
-
-    // 2. Verificação assíncrona garantindo sincronização com o servidor
-    dbService.checkHasRegisteredAdminAsync().then(({ hasAdmin, info }) => {
-      setHasMasterAdmin(hasAdmin);
-      if (info) {
-        setAdminInfo(info);
-      }
-    });
-  }, []);
 
   // Submissão do login administrativo
   const handleAdminSubmit = async (e: React.FormEvent) => {
