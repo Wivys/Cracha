@@ -20,6 +20,11 @@ import { FuncionarioWithTreinamentos } from '../types';
 import { dbService } from '../lib/supabase';
 import { repairFuncionarioObject } from '../lib/textSanitizer';
 import { buildShareableBadgeUrl } from '../lib/portableBadge';
+import {
+  isDailySyncDue,
+  formatLastSyncDate,
+  syncEmployeeWebtraining,
+} from '../lib/webtrainingSync';
 import { QrCodeDisplay } from '../components/QrCodeDisplay';
 import { VliLogo } from '../components/VliLogo';
 import { VliAvatar } from '../components/VliAvatar';
@@ -203,6 +208,13 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
   // Modal de Pop-up do QR Code
   const [showQrModal, setShowQrModal] = useState(false);
 
+  // Estado da Sincronização Diária da Universidade VLI
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<{
+    message: string;
+    type: 'success' | 'error' | 'info';
+  } | null>(null);
+
   useEffect(() => {
     const fetchColaborador = async () => {
       setLoading(true);
@@ -224,6 +236,54 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
 
     fetchColaborador();
   }, [matriculaOrId, retryCount]);
+
+  // Sincronização Diária Automática ao carregar o crachá
+  useEffect(() => {
+    if (!employee || !employee.webtraining_url || isSyncing) return;
+
+    if (isDailySyncDue(employee.last_webtraining_sync)) {
+      setIsSyncing(true);
+      syncEmployeeWebtraining(employee, false)
+        .then((res) => {
+          setIsSyncing(false);
+          if (res.updated) {
+            setEmployee(repairFuncionarioObject(res.employee));
+            setSyncFeedback({
+              type: 'success',
+              message:
+                res.changesCount > 0
+                  ? `${res.changesCount} atualização(ões) de vencimento/cursos sincronizada(s) da Universidade VLI!`
+                  : 'Registros da Universidade VLI verificados hoje.',
+            });
+            setTimeout(() => setSyncFeedback(null), 5000);
+          }
+        })
+        .catch(() => setIsSyncing(false));
+    }
+  }, [employee?.id, employee?.webtraining_url]);
+
+  const handleManualSync = async () => {
+    if (!employee || !employee.webtraining_url || isSyncing) return;
+    setIsSyncing(true);
+    setSyncFeedback(null);
+    try {
+      const res = await syncEmployeeWebtraining(employee, true);
+      if (res.updated) {
+        setEmployee(repairFuncionarioObject(res.employee));
+        setSyncFeedback({ type: 'success', message: res.message });
+      } else {
+        setSyncFeedback({ type: res.error ? 'error' : 'info', message: res.message });
+      }
+    } catch (err: any) {
+      setSyncFeedback({
+        type: 'error',
+        message: err.message || 'Falha ao sincronizar com a Universidade VLI.',
+      });
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => setSyncFeedback(null), 5000);
+    }
+  };
 
   const handleRetry = () => {
     setIsRetrying(true);
@@ -802,16 +862,63 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
                       )}
 
                       {/* 2. CURSOS DA UNIVERSIDADE VLI (GRADE 2 POR LINHA) */}
-                      {cursosUniversidadeVLi.length > 0 && (
+                      {(cursosUniversidadeVLi.length > 0 || employee.webtraining_url) && (
                         <div className="pt-1 space-y-2">
-                          <div className="flex items-center justify-between px-1">
-                            <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#002B49] uppercase">
-                              <GraduationCap className="w-4 h-4" />
-                              <span>Universidade VLi</span>
+                          <div className="flex flex-col gap-1.5 px-1">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5 text-xs font-extrabold text-[#002B49] uppercase">
+                                <GraduationCap className="w-4 h-4" />
+                                <span>Universidade VLi</span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                {employee.webtraining_url && (
+                                  <button
+                                    type="button"
+                                    id="btn-sincronizar-webtraining-card"
+                                    onClick={handleManualSync}
+                                    disabled={isSyncing}
+                                    title="Sincronizar vencimentos com a Universidade VLI agora"
+                                    className="px-2 py-0.5 bg-blue-100 hover:bg-blue-200 active:scale-95 text-[#002B49] font-bold text-[10px] rounded-md transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                  >
+                                    <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+                                    <span>{isSyncing ? 'Atualizando...' : 'Sincronizar'}</span>
+                                  </button>
+                                )}
+                                <span className="text-[9px] font-bold px-2 py-0.5 bg-blue-100 text-[#002B49] rounded-md">
+                                  {cursosUniversidadeVLi.length} itens
+                                </span>
+                              </div>
                             </div>
-                            <span className="text-[9px] font-bold px-2 py-0.5 bg-blue-100 text-[#002B49] rounded-md">
-                              {cursosUniversidadeVLi.length} itens
-                            </span>
+
+                            {/* Informações de Sincronização Diária */}
+                            {employee.webtraining_url && (
+                              <div className="flex items-center justify-between text-[9px] text-slate-500 bg-blue-50/60 px-2 py-1 rounded-md border border-blue-100">
+                                <span className="flex items-center gap-1 text-emerald-700 font-semibold">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                  Sincronização diária ativa
+                                </span>
+                                <span>{formatLastSyncDate(employee.last_webtraining_sync)}</span>
+                              </div>
+                            )}
+
+                            {syncFeedback && (
+                              <div
+                                className={`text-[10px] px-2 py-1 rounded-md flex items-center gap-1 font-semibold ${
+                                  syncFeedback.type === 'success'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : syncFeedback.type === 'error'
+                                    ? 'bg-rose-100 text-rose-800'
+                                    : 'bg-blue-100 text-blue-800'
+                                }`}
+                              >
+                                {syncFeedback.type === 'success' ? (
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                                ) : (
+                                  <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0" />
+                                )}
+                                <span>{syncFeedback.message}</span>
+                              </div>
+                            )}
                           </div>
 
                           <div className="grid grid-cols-2 gap-2 sm:gap-2.5">

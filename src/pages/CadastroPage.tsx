@@ -12,6 +12,7 @@ import {
   Download,
   Infinity,
   ChevronDown,
+  RefreshCw,
 } from 'lucide-react';
 import {
   FuncionarioWithTreinamentos,
@@ -22,6 +23,7 @@ import { dbService } from '../lib/supabase';
 import { VliAvatar } from '../components/VliAvatar';
 import { extractFromWebtrainingUrl } from '../lib/webtrainingParser';
 import { repairCorruptedText, repairFuncionarioObject } from '../lib/textSanitizer';
+import { formatLastSyncDate } from '../lib/webtrainingSync';
 
 interface CadastroPageProps {
   editingEmployee?: FuncionarioWithTreinamentos | null;
@@ -123,6 +125,11 @@ export const CadastroPage: React.FC<CadastroPageProps> = ({
       setUnidade(repaired.unidade || 'Corredor Centro-Leste');
       setFotoUrl(repaired.foto_url);
       setGenero(repaired.genero === 'M' ? 'M' : 'H');
+      if (repaired.webtraining_url) {
+        setWebtrainingUrl(repaired.webtraining_url);
+      } else {
+        setWebtrainingUrl('');
+      }
       setTrainings(
         (repaired.treinamentos || []).map((t, idx) => ({
           id: t.id || String(idx),
@@ -375,6 +382,10 @@ export const CadastroPage: React.FC<CadastroPageProps> = ({
         unidade: repairCorruptedText(unidade.trim() || editingEmployee?.unidade || 'Corredor Centro-Leste'),
         foto_url: fotoUrl,
         genero,
+        webtraining_url: webtrainingUrl.trim() || undefined,
+        last_webtraining_sync: webtrainingUrl.trim()
+          ? (editingEmployee?.last_webtraining_sync || new Date().toISOString())
+          : undefined,
         treinamentos: trainings.map((t) => ({
           nome_curso: repairCorruptedText(t.nome_curso),
           data_validade: t.data_validade,
@@ -452,6 +463,20 @@ export const CadastroPage: React.FC<CadastroPageProps> = ({
                   </>
                 )}
               </button>
+            </div>
+
+            {/* Aviso de Sincronização Diária Ativa */}
+            <div className="mt-2.5 pt-2.5 border-t border-blue-200/60 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-[11px]">
+              <div className="flex items-center gap-1.5 text-emerald-800 font-semibold">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Sincronização Diária Ativa</span>
+              </div>
+              <span className="text-slate-500 text-[10px]">
+                {editingEmployee?.last_webtraining_sync
+                  ? `Última checagem: ${formatLastSyncDate(editingEmployee.last_webtraining_sync)}`
+                  : 'Atualiza cursos e vencimentos automaticamente todos os dias'}
+              </span>
             </div>
 
             {/* Feedback da Extração */}

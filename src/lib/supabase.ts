@@ -697,6 +697,8 @@ export const dbService = {
     unidade?: string;
     foto_url: string | null;
     genero?: 'M' | 'H';
+    webtraining_url?: string;
+    last_webtraining_sync?: string;
     treinamentos: Array<{
       nome_curso: string;
       data_validade: string;
@@ -730,12 +732,20 @@ export const dbService = {
         const { data: existingRecords } = await queryBuilder.limit(1);
         const existingFunc = Array.isArray(existingRecords) && existingRecords.length > 0 ? existingRecords[0] : null;
 
+        let unidadePayload = (data.unidade || 'Malha Operacional VLI').trim();
+        if (data.webtraining_url) {
+          unidadePayload += ` || webtraining:${JSON.stringify({
+            url: data.webtraining_url.trim(),
+            lastSync: data.last_webtraining_sync || nowIso,
+          })}`;
+        }
+
         const payload: any = {
           nome: data.nome.trim(),
           matricula: cleanMatricula,
           foto_url: data.foto_url || null,
           cargo: data.cargo || 'Operador Ferroviário / Logística',
-          unidade: data.unidade || 'Malha Operacional VLI',
+          unidade: unidadePayload,
           genero: data.genero || 'H',
         };
 
@@ -832,6 +842,8 @@ export const dbService = {
       cargo: data.cargo || 'Operação Ferroviária & Logística',
       unidade: data.unidade || 'Corredor Centro-Leste',
       genero: data.genero || 'H',
+      webtraining_url: data.webtraining_url ? data.webtraining_url.trim() : undefined,
+      last_webtraining_sync: data.last_webtraining_sync || (data.webtraining_url ? nowIso : undefined),
       created_at: nowIso,
       treinamentos: (data.treinamentos || []).map((t, idx) => ({
         id: `trn-${Date.now()}-${idx}`,

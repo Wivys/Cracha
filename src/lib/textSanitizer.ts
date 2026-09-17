@@ -241,7 +241,28 @@ export function repairFuncionarioObject<T extends Record<string, any>>(func: T):
     gerencia: repairCorruptedText(func.gerencia),
     area: repairCorruptedText(func.area),
     local: repairCorruptedText(func.local),
+    webtraining_url: func.webtraining_url ? String(func.webtraining_url).trim() : undefined,
+    last_webtraining_sync: func.last_webtraining_sync ? String(func.last_webtraining_sync).trim() : undefined,
   };
+
+  // Se unidade tiver embutida a metadata de sincronização da Universidade VLI
+  if (typeof func.unidade === 'string' && func.unidade.includes('|| webtraining:')) {
+    const [realUnidade, metaStr] = func.unidade.split('|| webtraining:');
+    repaired.unidade = repairCorruptedText(realUnidade.trim());
+    try {
+      const meta = JSON.parse(metaStr.trim());
+      if (meta && meta.url && !repaired.webtraining_url) {
+        repaired.webtraining_url = meta.url;
+      }
+      if (meta && meta.lastSync && !repaired.last_webtraining_sync) {
+        repaired.last_webtraining_sync = meta.lastSync;
+      }
+    } catch {
+      // Ignora erro de parse na metadata
+    }
+  } else {
+    repaired.unidade = repairCorruptedText(func.unidade);
+  }
 
   if (Array.isArray(repaired.treinamentos)) {
     repaired.treinamentos = repaired.treinamentos.map(repairCourseObject);

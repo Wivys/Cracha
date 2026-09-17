@@ -16,6 +16,8 @@ export interface Funcionario {
   unidade?: string;
   genero?: 'M' | 'H';
   created_at?: string;
+  webtraining_url?: string;
+  last_webtraining_sync?: string;
 }
 
 export interface Treinamento {

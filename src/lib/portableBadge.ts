@@ -14,6 +14,8 @@ interface MinifiedBadge {
   c?: string; // cargo
   u?: string; // unidade
   g?: 'H' | 'M'; // genero
+  w?: string; // webtraining_url
+  s?: string; // last_webtraining_sync
   t: Array<[
     string, // 0: nome_curso
     string, // 1: data_validade
@@ -81,6 +83,8 @@ export function encodeBadgeToken(employee: FuncionarioWithTreinamentos): string 
     c: employee.cargo ? String(employee.cargo).trim().toUpperCase() : '',
     u: employee.unidade ? String(employee.unidade).trim() : '',
     g: employee.genero === 'M' ? 'M' : 'H',
+    w: employee.webtraining_url ? String(employee.webtraining_url).trim() : undefined,
+    s: employee.last_webtraining_sync ? String(employee.last_webtraining_sync).trim() : undefined,
     t: (employee.treinamentos || []).map((t) => [
       String(t.nome_curso || '').trim(),
       String(t.data_validade || '').trim(),
@@ -135,6 +139,8 @@ export function decodeBadgeToken(token: string): FuncionarioWithTreinamentos | n
       unidade: m.u || 'CORREDOR CENTRO-LESTE',
       genero: m.g || 'H',
       foto_url: null,
+      webtraining_url: m.w || undefined,
+      last_webtraining_sync: m.s || undefined,
       created_at: new Date().toISOString(),
       treinamentos,
     };

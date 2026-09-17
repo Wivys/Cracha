@@ -14,12 +14,19 @@ import {
   Clock,
   X,
   FileDown,
+  RefreshCw,
+  GraduationCap,
 } from 'lucide-react';
 import {
   FuncionarioWithTreinamentos,
   FilterStatus,
 } from '../types';
 import { dbService, loadLocalStore } from '../lib/supabase';
+import {
+  formatLastSyncDate,
+  syncEmployeeWebtraining,
+  syncAllLinkedEmployees,
+} from '../lib/webtrainingSync';
 
 interface GaleriaCardsPageProps {
   employees: FuncionarioWithTreinamentos[];
@@ -65,6 +72,14 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
 
   // Copied feedback toast
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Sincronização Diária da Universidade VLI
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const [syncingEmpId, setSyncingEmpId] = useState<string | null>(null);
+  const [syncToast, setSyncToast] = useState<{
+    message: string;
+    type: 'success' | 'info' | 'error';
+  } | null>(null);
 
   // Refresh employees on mount to ensure cards are always loaded
   useEffect(() => {
@@ -150,6 +165,56 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
     });
   }, [activeEmployees, searchTerm, filterStatus]);
 
+  // Contagem de colaboradores com link da Universidade VLI
+  const linkedEmployeesCount = useMemo(() => {
+    return activeEmployees.filter((e) => Boolean(e.webtraining_url && e.webtraining_url.trim())).length;
+  }, [activeEmployees]);
+
+  // Sincronização em Massa de todos os colaboradores vinculados
+  const handleSyncAllWebtraining = async () => {
+    if (isSyncingAll || linkedEmployeesCount === 0) return;
+    setIsSyncingAll(true);
+    setSyncToast(null);
+    try {
+      const summary = await syncAllLinkedEmployees(activeEmployees, true);
+      onRefresh();
+      setSyncToast({
+        type: 'success',
+        message: `${summary.totalLinked} crachá(s) analisado(s). ${summary.totalChanges} alteração(ões) de cursos/vencimentos atualizada(s)!`,
+      });
+    } catch (err: any) {
+      setSyncToast({
+        type: 'error',
+        message: err.message || 'Erro ao sincronizar com a Universidade VLI.',
+      });
+    } finally {
+      setIsSyncingAll(false);
+      setTimeout(() => setSyncToast(null), 5000);
+    }
+  };
+
+  // Sincronização individual de um colaborador
+  const handleSyncSingle = async (emp: FuncionarioWithTreinamentos) => {
+    if (syncingEmpId) return;
+    setSyncingEmpId(emp.id);
+    try {
+      const res = await syncEmployeeWebtraining(emp, true);
+      onRefresh();
+      setSyncToast({
+        type: res.updated ? 'success' : 'info',
+        message: res.message,
+      });
+    } catch (err: any) {
+      setSyncToast({
+        type: 'error',
+        message: err.message || 'Falha ao sincronizar colaborador.',
+      });
+    } finally {
+      setSyncingEmpId(null);
+      setTimeout(() => setSyncToast(null), 4000);
+    }
+  };
+
   // Action: Copiar Link (ícone de globo) - Link Curto e Limpo
   const handleCopyLink = async (emp: FuncionarioWithTreinamentos) => {
     const url = `${window.location.origin}/card/${encodeURIComponent(emp.matricula || emp.id)}`;
@@ -211,6 +276,28 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
         <div className="fixed bottom-6 right-6 z-50 bg-[#002B49] text-white px-4 py-2.5 rounded-xl shadow-2xl border-2 border-amber-400 flex items-center gap-2 animate-in fade-in slide-in-from-bottom-5">
           <CheckCircle2 className="w-4 h-4 text-amber-400" />
           <span className="text-xs font-bold">Link do crachá copiado com sucesso!</span>
+        </div>
+      )}
+
+      {/* Toast de Sincronização Diária */}
+      {syncToast && (
+        <div
+          className={`fixed bottom-6 left-6 z-50 px-4 py-2.5 rounded-xl shadow-2xl border flex items-center gap-2 animate-in fade-in slide-in-from-bottom-5 max-w-md ${
+            syncToast.type === 'success'
+              ? 'bg-emerald-950 text-white border-emerald-400'
+              : syncToast.type === 'error'
+              ? 'bg-rose-950 text-white border-rose-400'
+              : 'bg-[#002B49] text-white border-amber-400'
+          }`}
+        >
+          {syncToast.type === 'success' ? (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          ) : syncToast.type === 'error' ? (
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+          ) : (
+            <RefreshCw className="w-4 h-4 text-amber-400 shrink-0 animate-spin" />
+          )}
+          <span className="text-xs font-bold">{syncToast.message}</span>
         </div>
       )}
 
@@ -309,6 +396,27 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
             >
               A Vencer
             </button>
+
+            {/* Botão de Atualização Diária da Universidade VLI */}
+            {linkedEmployeesCount > 0 && (
+              <button
+                type="button"
+                id="btn-sincronizar-todos-webtraining"
+                onClick={handleSyncAllWebtraining}
+                disabled={isSyncingAll}
+                className="ml-auto px-3 py-1 bg-gradient-to-r from-[#002B49] to-blue-900 hover:from-blue-950 hover:to-slate-900 active:scale-98 text-white font-bold text-xs rounded-lg shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 border border-blue-700/50 shrink-0"
+                title="Sincroniza diariamente cursos e vencimentos da Universidade VLI para todos os colaboradores vinculados"
+              >
+                <RefreshCw
+                  className={`w-3.5 h-3.5 text-[#FFB81C] ${isSyncingAll ? 'animate-spin' : ''}`}
+                />
+                <span>
+                  {isSyncingAll
+                    ? 'Sincronizando...'
+                    : `Sincronizar Universidade VLI (${linkedEmployeesCount})`}
+                </span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -386,6 +494,34 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
                     </span>
                   </div>
                 </div>
+
+                {/* Tag de Sincronização Diária da Universidade VLI */}
+                {emp.webtraining_url && (
+                  <div className="mx-3 mb-2 px-2 py-1 bg-blue-50/80 border border-blue-200/60 rounded-lg flex items-center justify-between text-[10px]">
+                    <span
+                      className="flex items-center gap-1 text-[#002B49] font-bold truncate max-w-[170px]"
+                      title={`Link ativo da Universidade VLI: ${emp.webtraining_url}`}
+                    >
+                      <GraduationCap className="w-3 h-3 text-[#FFB81C] shrink-0" />
+                      <span className="truncate">{formatLastSyncDate(emp.last_webtraining_sync)}</span>
+                    </span>
+                    <button
+                      type="button"
+                      id={`btn-sync-single-${cardKey}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSyncSingle(emp);
+                      }}
+                      disabled={syncingEmpId === emp.id}
+                      title="Sincronizar com a Universidade VLI agora"
+                      className="p-1 hover:bg-blue-100 rounded text-[#002B49] transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw
+                        className={`w-3 h-3 ${syncingEmpId === emp.id ? 'animate-spin text-amber-500' : ''}`}
+                      />
+                    </button>
+                  </div>
+                )}
 
                 {/* Card Footer: 4 distinct action buttons matching 1.jpg */}
                 <div className="p-2.5 pt-0 flex items-center justify-center gap-2">

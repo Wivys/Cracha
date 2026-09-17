@@ -601,6 +601,78 @@ async function startServer() {
     }
   });
 
+  // 8. Rotina de Sincronização Diária em Segundo Plano
+  const runBackgroundDailySync = async () => {
+    try {
+      const list = readColaboradores();
+      if (!list || list.length === 0) return;
+
+      const now = new Date();
+      let hasChanges = false;
+
+      for (let i = 0; i < list.length; i++) {
+        const emp = list[i];
+        if (!emp || !emp.webtraining_url) continue;
+
+        // Verifica se precisa de sincronização (> 12h ou outro dia)
+        let isDue = false;
+        if (!emp.last_webtraining_sync) {
+          isDue = true;
+        } else {
+          const lastDate = new Date(emp.last_webtraining_sync);
+          const diffHours = (now.getTime() - lastDate.getTime()) / (1000 * 60 * 60);
+          if (diffHours >= 12 || lastDate.toDateString() !== now.toDateString()) {
+            isDue = true;
+          }
+        }
+
+        if (isDue) {
+          try {
+            const extractRes = await fetch(`http://127.0.0.1:${PORT}/api/extract-webtraining`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: emp.webtraining_url }),
+            });
+            if (extractRes.ok) {
+              const resJson = await extractRes.json();
+              if (
+                resJson?.success &&
+                Array.isArray(resJson.data?.cursos) &&
+                resJson.data.cursos.length > 0
+              ) {
+                const novosCursos = resJson.data.cursos;
+                const existingNonWeb = (emp.treinamentos || []).filter(
+                  (t: any) => t.origem !== 'universidade_vli' && !t.origem_webtraining
+                );
+                emp.treinamentos = [...existingNonWeb, ...novosCursos];
+                emp.last_webtraining_sync = now.toISOString();
+                hasChanges = true;
+                console.log(
+                  `[Sync Automático VLI] Atualizado crachá ${emp.matricula} (${emp.nome}) com ${novosCursos.length} cursos.`
+                );
+              }
+            }
+          } catch (syncErr) {
+            console.warn(
+              `[Sync Automático VLI] Falha ao sincronizar ${emp.matricula}:`,
+              syncErr
+            );
+          }
+        }
+      }
+
+      if (hasChanges) {
+        writeColaboradores(list);
+      }
+    } catch (err) {
+      console.warn('[Sync Automático VLI] Erro no ciclo de sincronização:', err);
+    }
+  };
+
+  // Agenda sincronização a cada 4 horas e após 30s da inicialização
+  setInterval(runBackgroundDailySync, 4 * 60 * 60 * 1000);
+  setTimeout(runBackgroundDailySync, 30000);
+
   // Configuração do Vite middleware para desenvolvimento ou arquivos estáticos em produção
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
