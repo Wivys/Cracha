@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import QRCode from 'qrcode';
 import { Download, Copy, Check, Share2 } from 'lucide-react';
+import { shareQrCodeAsJpg, downloadQrCodeAsJpg } from '../lib/qrCodeExport';
 
 interface QrCodeDisplayProps {
   value: string;
@@ -11,6 +12,7 @@ interface QrCodeDisplayProps {
   showShareOnlyButton?: boolean;
   matricula?: string;
   nome?: string;
+  cargo?: string;
 }
 
 export const QrCodeDisplay: React.FC<QrCodeDisplayProps> = ({
@@ -22,6 +24,7 @@ export const QrCodeDisplay: React.FC<QrCodeDisplayProps> = ({
   showShareOnlyButton = false,
   matricula,
   nome,
+  cargo,
 }) => {
   const [dataUrl, setDataUrl] = useState<string>('');
   const [copied, setCopied] = useState(false);
@@ -49,33 +52,17 @@ export const QrCodeDisplay: React.FC<QrCodeDisplayProps> = ({
 
   const handleShareQrOnly = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!dataUrl) return;
+    if (!value) return;
 
     try {
-      const res = await fetch(dataUrl);
-      const blob = await res.blob();
-      const fileName = `QRCode_VLI_${matricula || 'card'}.png`;
-      const file = new File([blob], fileName, { type: 'image/png' });
+      const res = await shareQrCodeAsJpg({
+        url: value,
+        nome,
+        matricula,
+        cargo,
+      });
 
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: `QR Code VLI - ${nome || matricula || 'Crachá'}`,
-          text: `QR Code de Acesso e Verificação do Colaborador VLI`,
-        });
-        setShared(true);
-        setTimeout(() => setShared(false), 2000);
-      } else if (navigator.share) {
-        await navigator.share({
-          title: `QR Code VLI - ${nome || matricula || 'Crachá'}`,
-          text: `QR Code do Colaborador VLI`,
-          url: value,
-        });
-        setShared(true);
-        setTimeout(() => setShared(false), 2000);
-      } else {
-        // Fallback for browsers that don't support Web Share
-        handleDownloadQr(e);
+      if (res.success) {
         setShared(true);
         setTimeout(() => setShared(false), 2000);
       }
@@ -105,15 +92,19 @@ export const QrCodeDisplay: React.FC<QrCodeDisplayProps> = ({
     }
   };
 
-  const handleDownloadQr = (e: React.MouseEvent) => {
+  const handleDownloadQr = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!dataUrl) return;
-    const link = document.createElement('a');
-    link.href = dataUrl;
-    link.download = `QRCode_VLI_${matricula || 'card'}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (!value) return;
+    try {
+      await downloadQrCodeAsJpg({
+        url: value,
+        nome,
+        matricula,
+        cargo,
+      });
+    } catch (err) {
+      console.error('Erro ao baixar QR code JPG:', err);
+    }
   };
 
   return (
@@ -191,10 +182,10 @@ export const QrCodeDisplay: React.FC<QrCodeDisplayProps> = ({
             id={`download-qr-btn-${matricula || 'card'}`}
             onClick={handleDownloadQr}
             className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-            title="Baixar QR Code PNG"
+            title="Baixar Foto JPG do QR Code"
           >
             <Download className="w-3.5 h-3.5 text-slate-600" />
-            <span>Baixar</span>
+            <span>Baixar JPG</span>
           </button>
         </div>
       )}

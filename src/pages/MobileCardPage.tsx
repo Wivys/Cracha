@@ -15,6 +15,7 @@ import {
   Clock,
   Infinity,
   RefreshCw,
+  Download,
 } from 'lucide-react';
 import { FuncionarioWithTreinamentos } from '../types';
 import { dbService } from '../lib/supabase';
@@ -28,6 +29,7 @@ import {
 import { QrCodeDisplay } from '../components/QrCodeDisplay';
 import { VliLogo } from '../components/VliLogo';
 import { VliAvatar } from '../components/VliAvatar';
+import { shareQrCodeAsJpg, downloadQrCodeAsJpg } from '../lib/qrCodeExport';
 
 interface MobileCardPageProps {
   matriculaOrId: string;
@@ -376,28 +378,60 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
     }
   };
 
-  // Compartilhamento geral do crachá
-  const handleShare = async () => {
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `Crachá VLI - ${employee.nome}`,
-          text: `Acesse o crachá digital e certificações de ${employee.nome}:`,
-          url: actualPublicUrl,
-        });
-        return;
-      } catch {
-        // Fallback para cópia
-      }
-    }
+  // Estado de processamento e feedback de compartilhamento
+  const [isSharing, setIsSharing] = useState(false);
+  const [shareToast, setShareToast] = useState<string | null>(null);
 
+  // Compartilhamento do QR Code oficial em formato JPG (Foto / Imagem)
+  const handleShare = async () => {
+    if (!employee || isSharing) return;
+    setIsSharing(true);
     try {
-      await navigator.clipboard.writeText(actualPublicUrl);
-      setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2500);
-    } catch {
-      setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2500);
+      const res = await shareQrCodeAsJpg({
+        url: actualPublicUrl || directTokenUrl,
+        nome: employee.nome,
+        matricula: employee.matricula,
+        cargo: employee.cargo,
+        unidade: employee.unidade,
+      });
+
+      if (res.sharedViaNative) {
+        setCopiedLink(true);
+        setShareToast('Foto JPG do QR Code compartilhada!');
+        setTimeout(() => {
+          setCopiedLink(false);
+          setShareToast(null);
+        }, 3000);
+      } else if (res.downloaded) {
+        setCopiedLink(true);
+        setShareToast('Foto JPG salva no aparelho e link copiado!');
+        setTimeout(() => {
+          setCopiedLink(false);
+          setShareToast(null);
+        }, 3500);
+      }
+    } catch (err) {
+      console.error('Erro ao compartilhar QR Code em JPG:', err);
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  // Download direto da foto JPG do QR Code
+  const handleDownloadJpg = async () => {
+    if (!employee) return;
+    try {
+      await downloadQrCodeAsJpg({
+        url: actualPublicUrl || directTokenUrl,
+        nome: employee.nome,
+        matricula: employee.matricula,
+        cargo: employee.cargo,
+        unidade: employee.unidade,
+      });
+      setShareToast('Foto JPG baixada com sucesso!');
+      setTimeout(() => setShareToast(null), 3000);
+    } catch (err) {
+      console.error('Erro ao baixar QR Code JPG:', err);
     }
   };
 
@@ -422,41 +456,54 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 md:bg-slate-900 py-3 sm:py-6 md:py-10 px-2 sm:px-4 md:px-6 flex flex-col items-center justify-start sm:justify-center relative overflow-x-hidden">
-      {/* Controles Flutuantes Superiores - Adaptativo para Mobile e PC */}
-      <div className="w-full max-w-md md:max-w-2xl mb-3 flex items-center justify-between z-20 px-1">
+    <div className="min-h-screen bg-slate-100 md:bg-slate-900 py-0 sm:py-6 md:py-10 px-0 sm:px-4 md:px-6 flex flex-col items-center justify-start sm:justify-center relative overflow-x-hidden w-full">
+      {/* Toast flutuante de confirmação do JPG */}
+      {shareToast && (
+        <div className="fixed top-3 sm:top-5 z-50 bg-[#002B49] text-white px-4 py-2.5 rounded-2xl shadow-xl border border-amber-400 flex items-center gap-2 text-xs font-bold animate-in fade-in slide-in-from-top-2">
+          <Check className="w-4 h-4 text-emerald-400" />
+          <span>{shareToast}</span>
+        </div>
+      )}
+
+      {/* Barra de Controles Superiores - Adaptativo para Mobile e PC */}
+      <div className="w-full max-w-full sm:max-w-md md:max-w-2xl px-3 py-2.5 sm:px-1 sm:mb-3 flex items-center justify-between z-20 bg-slate-900/95 sm:bg-transparent backdrop-blur-md sm:backdrop-blur-none border-b border-slate-800/80 sm:border-0 sticky top-0 sm:static">
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white sm:bg-slate-800/90 hover:bg-slate-50 sm:hover:bg-slate-800 text-slate-800 sm:text-slate-200 hover:text-slate-950 sm:hover:text-white rounded-xl text-xs font-bold transition-colors border border-slate-200 sm:border-slate-700 shadow-2xs cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white/10 hover:bg-white/20 sm:bg-white sm:hover:bg-slate-50 text-white sm:text-slate-800 rounded-xl text-xs font-bold transition-all border border-white/10 sm:border-slate-200 cursor-pointer shadow-xs"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           <span>{isAdminLoggedIn ? 'Painel ADM' : 'Sair'}</span>
         </button>
 
         <div className="flex items-center gap-2">
+          {/* Único botão de QR Code na tela - compacto e posicionado no topo */}
           <button
             type="button"
+            id="btn-qrcode-topo"
             onClick={() => setShowQrModal(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#FFB81C] hover:bg-[#F5A800] text-slate-950 rounded-xl text-xs font-bold transition-colors shadow-2xs cursor-pointer"
+            className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center bg-[#FFB81C] hover:bg-[#F5A800] active:scale-95 text-slate-950 rounded-xl transition-all shadow-xs cursor-pointer border border-amber-400"
             title="Abrir QR Code de Acesso"
+            aria-label="Abrir QR Code de Acesso"
           >
-            <QrCode className="w-3.5 h-3.5 stroke-[2.5]" />
-            <span>QR Code</span>
+            <QrCode className="w-4 h-4 stroke-[2.5]" />
           </button>
 
+          {/* Botão de Compartilhar Foto JPG - apenas com a imagem/ícone que já existe */}
           <button
             type="button"
+            id="btn-compartilhar-topo"
             onClick={handleShare}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white sm:bg-slate-800/90 hover:bg-slate-50 sm:hover:bg-slate-800 text-slate-800 sm:text-slate-200 hover:text-[#002B49] sm:hover:text-[#FFB81C] rounded-xl text-xs font-bold transition-colors border border-slate-200 sm:border-slate-700 shadow-2xs cursor-pointer"
-            title="Compartilhar Link"
+            disabled={isSharing}
+            className="w-8 h-8 sm:w-9 sm:h-9 flex items-center justify-center bg-white/10 hover:bg-white/20 sm:bg-white sm:hover:bg-slate-50 active:scale-95 text-white sm:text-slate-800 hover:text-amber-300 sm:hover:text-[#002B49] rounded-xl transition-all border border-white/10 sm:border-slate-200 shadow-xs cursor-pointer disabled:opacity-50"
+            title={copiedLink ? 'Foto JPG Enviada!' : 'Compartilhar Foto JPG do QR Code'}
+            aria-label="Compartilhar Foto JPG do QR Code"
           >
             {copiedLink ? (
-              <Check className="w-3.5 h-3.5 text-emerald-600 sm:text-emerald-400" />
+              <Check className="w-4 h-4 text-emerald-400 sm:text-emerald-600" />
             ) : (
-              <Share2 className="w-3.5 h-3.5" />
+              <Share2 className="w-4 h-4" />
             )}
-            <span>{copiedLink ? 'Copiado!' : 'Compartilhar'}</span>
           </button>
         </div>
       </div>
@@ -464,7 +511,7 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
       {/* CONTAINER COM PERSPECTIVA 3D PARA GIRO REAL DO CRACHÁ */}
       <div
         style={{ perspective: '1400px' }}
-        className="w-full max-w-md md:max-w-2xl mx-auto"
+        className="w-full max-w-full sm:max-w-md md:max-w-2xl mx-auto flex-1 flex flex-col"
       >
         <div
           id="cracha-card-3d"
@@ -474,7 +521,7 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
             transition: 'transform 0.75s cubic-bezier(0.35, 0.1, 0.25, 1)',
             display: 'grid',
           }}
-          className="w-full relative"
+          className="w-full relative flex-1"
         >
           {/* =================================================================== */}
           {/* FACE 1: FRENTE DO CRACHÁ (IDENTIFICAÇÃO + STATUS + QR CODE)        */}
@@ -487,11 +534,11 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
               transform: 'rotateY(0deg)',
               pointerEvents: cardSide === 'frente' ? 'auto' : 'none',
             }}
-            className="w-full bg-white rounded-2xl sm:rounded-3xl shadow-lg sm:shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col justify-between transition-shadow"
+            className="w-full bg-white rounded-none sm:rounded-3xl shadow-none sm:shadow-2xl border-0 sm:border border-slate-200/80 overflow-hidden flex flex-col justify-between transition-shadow min-h-screen sm:min-h-0"
           >
             <div>
               {/* Topo Oficial Azul Marinho VLI */}
-              <div className="bg-[#002B49] text-white px-4 sm:px-6 py-3.5 sm:py-4 flex items-center justify-between">
+              <div className="bg-[#002B49] text-white px-3.5 sm:px-6 py-3.5 sm:py-4 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <VliLogo variant="white" size="md" showSubtitle={true} />
                 </div>
@@ -530,7 +577,7 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
               </div>
 
               {/* Corpo da Frente: Cabeçalho Lado a Lado */}
-              <div className="p-4 sm:p-6 md:p-8 flex flex-col">
+              <div className="p-3.5 sm:p-6 md:p-8 flex flex-col">
                 <div className="flex items-center gap-3 sm:gap-5 pb-4 border-b border-slate-100">
                   {/* Foto / Avatar à esquerda */}
                   <div className="shrink-0 flex flex-col items-center">
@@ -602,8 +649,8 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
                 </div>
 
                 {/* Painel de Indicadores Rápidos */}
-                <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-2.5 sm:gap-3 text-left">
-                  <div className="p-3 bg-emerald-50/80 border border-emerald-200/80 rounded-2xl">
+                <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-2 sm:gap-3 text-left">
+                  <div className="p-2.5 sm:p-3 bg-emerald-50/80 border border-emerald-200/80 rounded-2xl">
                     <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-800">
                       <Shield className="w-3.5 h-3.5 text-emerald-600" />
                       <span>Status do Crachá</span>
@@ -613,7 +660,7 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
                     </p>
                   </div>
 
-                  <div className="p-3 bg-blue-50/80 border border-blue-200/80 rounded-2xl">
+                  <div className="p-2.5 sm:p-3 bg-blue-50/80 border border-blue-200/80 rounded-2xl">
                     <div className="flex items-center gap-1.5 text-[11px] font-bold text-[#002B49]">
                       <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />
                       <span>Treinamentos</span>
@@ -623,7 +670,7 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
                     </p>
                   </div>
 
-                  <div className="col-span-2 md:col-span-1 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+                  <div className="col-span-2 md:col-span-1 p-2.5 sm:p-3 bg-slate-50 border border-slate-200 rounded-2xl">
                     <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-600">
                       <Building2 className="w-3.5 h-3.5 text-slate-500" />
                       <span>Unidade / Base</span>
@@ -635,7 +682,7 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
                 </div>
 
                 {/* Verificação Online (Clique para copiar) */}
-                <div className="mt-4 p-3 sm:p-4 bg-slate-50 rounded-2xl border border-slate-200 text-left sm:text-center">
+                <div className="mt-3.5 p-3 sm:p-4 bg-slate-50 rounded-2xl border border-slate-200 text-left sm:text-center">
                   <span className="text-[11px] text-slate-500 font-semibold block mb-1">
                     Link de Verificação Online (clique para copiar):
                   </span>
@@ -646,7 +693,7 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
                     className="group w-full flex items-center justify-between sm:justify-center gap-2 px-3 py-2 bg-white hover:bg-amber-50 active:scale-98 border border-slate-200 hover:border-amber-300 rounded-xl transition-all cursor-pointer"
                     title="Clique para copiar o link de verificação"
                   >
-                    <span className="text-xs font-mono font-bold text-[#002B49] group-hover:text-blue-950 truncate max-w-[280px] sm:max-w-none">
+                    <span className="text-xs font-mono font-bold text-[#002B49] group-hover:text-blue-950 truncate max-w-[260px] sm:max-w-none">
                       {directTokenUrl}
                     </span>
                     {copiedVerificationLink ? (
@@ -661,17 +708,10 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
               </div>
             </div>
 
-            {/* Ações do Rodapé da Frente */}
-            <div className="p-4 sm:p-6 md:p-8 pt-0">
-              <button
-                type="button"
-                id="btn-exportar-qr-code"
-                onClick={() => setShowQrModal(true)}
-                className="w-full py-3 px-5 bg-[#FFB81C] hover:bg-[#F5A800] active:scale-98 text-slate-950 font-black text-sm sm:text-base rounded-2xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer border border-amber-400"
-              >
-                <QrCode className="w-5 h-5 text-slate-950 stroke-[2.5]" />
-                <span>Exportar QR Code de Acesso</span>
-              </button>
+            {/* Rodapé da Frente - Limpo e Oficial */}
+            <div className="px-4 sm:px-6 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+              <span className="font-semibold text-slate-600">VLI Credenciamento Digital</span>
+              <span className="font-mono text-slate-400 text-[10px]">Autenticado • 100% Seguro</span>
             </div>
           </div>
 
@@ -686,11 +726,11 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
               transform: 'rotateY(180deg)',
               pointerEvents: cardSide === 'verso' ? 'auto' : 'none',
             }}
-            className="w-full bg-white rounded-2xl sm:rounded-3xl shadow-lg sm:shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col justify-between transition-shadow"
+            className="w-full bg-white rounded-none sm:rounded-3xl shadow-none sm:shadow-2xl border-0 sm:border border-slate-200/80 overflow-hidden flex flex-col justify-between transition-shadow min-h-screen sm:min-h-0"
           >
             <div>
               {/* Topo Oficial Azul Marinho VLI */}
-              <div className="bg-[#002B49] text-white px-4 sm:px-6 py-3.5 sm:py-4 flex items-center justify-between">
+              <div className="bg-[#002B49] text-white px-3.5 sm:px-6 py-3.5 sm:py-4 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <VliLogo variant="white" size="md" showSubtitle={true} />
                 </div>
@@ -727,7 +767,7 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
               </div>
 
               {/* Conteúdo do Verso: Cabeçalho Compacto + Treinamentos Lado a Lado (2 por linha) */}
-              <div className="p-4 sm:p-6 md:p-8 flex flex-col text-left">
+              <div className="p-3.5 sm:p-6 md:p-8 flex flex-col text-left">
                 {/* Cabeçalho Compacto do Colaborador */}
                 <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
                   <VliAvatar
@@ -761,7 +801,7 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
                 </div>
 
                 {/* LISTA DE TREINAMENTOS LADO A LADO (2 POR LINHA) COM SCROLL INTERNO */}
-                <div className="w-full border border-slate-200 rounded-2xl p-2 sm:p-3 bg-slate-50/50 max-h-60 sm:max-h-72 md:max-h-80 overflow-y-auto space-y-3">
+                <div className="w-full border border-slate-200 rounded-2xl p-2 sm:p-3 bg-slate-50/50 max-h-[380px] sm:max-h-80 md:max-h-96 overflow-y-auto space-y-3">
                   {employee.treinamentos.length === 0 ? (
                     <p className="text-xs sm:text-sm text-slate-500 text-center py-6">
                       Nenhum treinamento registrado no crachá.
@@ -1013,16 +1053,10 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
               </div>
             </div>
 
-            {/* Ações do Rodapé do Verso */}
-            <div className="p-4 sm:p-6 md:p-8 pt-0">
-              <button
-                type="button"
-                onClick={() => setShowQrModal(true)}
-                className="w-full py-3 px-5 bg-[#FFB81C] hover:bg-[#F5A800] active:scale-98 text-slate-950 font-black text-sm sm:text-base rounded-2xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer border border-amber-400"
-              >
-                <QrCode className="w-5 h-5 stroke-[2.5]" />
-                <span>Exportar QR Code de Acesso</span>
-              </button>
+            {/* Rodapé do Verso - Limpo e Oficial */}
+            <div className="px-4 sm:px-6 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+              <span className="font-semibold text-slate-600">Universidade VLI</span>
+              <span className="font-mono text-slate-400 text-[10px]">{treinamentosValidos}/{totalTreinamentos} Cursos Ativos</span>
             </div>
           </div>
         </div>
@@ -1069,6 +1103,7 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
                   showActions={false}
                   matricula={employee.matricula}
                   nome={employee.nome}
+                  cargo={employee.cargo}
                 />
               </div>
 
@@ -1100,25 +1135,40 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
                 </button>
               </div>
 
-              {/* Botões de Ação do QR Code: Compartilhar e Fechar */}
+              {/* Botões de Ação do QR Code: Compartilhar Foto JPG, Baixar Foto JPG e Fechar */}
               <div className="mt-4 w-full grid grid-cols-2 gap-2">
                 <button
                   type="button"
+                  id="btn-compartilhar-modal-jpg"
                   onClick={handleShare}
-                  className="py-2.5 px-3 bg-[#002B49] hover:bg-blue-950 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                  disabled={isSharing}
+                  className="py-2.5 px-3 bg-[#002B49] hover:bg-blue-950 active:scale-95 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs border border-amber-400/30 disabled:opacity-50"
+                  title="Compartilhar Foto JPG do QR Code"
                 >
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span>Compartilhar</span>
+                  <Share2 className="w-3.5 h-3.5 text-[#FFB81C]" />
+                  <span>{isSharing ? 'Gerando...' : 'Compartilhar (JPG)'}</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setShowQrModal(false)}
-                  className="py-2.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                  id="btn-baixar-modal-jpg"
+                  onClick={handleDownloadJpg}
+                  className="py-2.5 px-3 bg-amber-50 hover:bg-amber-100 active:scale-95 text-[#002B49] font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-amber-300 shadow-xs"
+                  title="Baixar Foto JPG do QR Code"
                 >
-                  Fechar
+                  <Download className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Baixar JPG</span>
                 </button>
               </div>
+
+              <button
+                type="button"
+                id="btn-fechar-modal-acao"
+                onClick={() => setShowQrModal(false)}
+                className="mt-2.5 w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-700 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1 cursor-pointer"
+              >
+                Fechar
+              </button>
             </div>
           </div>
         </div>
