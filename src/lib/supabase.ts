@@ -241,7 +241,7 @@ export function toSafeDateForSupabase(dateStr?: string | null): string {
  */
 export const dbService = {
   /**
-   * Verifica se já existe um Administrador Definitivo cadastrado no sistema
+   * Verifica se já existe um Administrador Definitivo cadastrado no sistema (localmente e no servidor)
    */
   hasRegisteredAdmin(): boolean {
     try {
@@ -250,6 +250,56 @@ export const dbService = {
     } catch {
       return false;
     }
+  },
+
+  /**
+   * Checagem assíncrona que sincroniza e valida o status com o servidor
+   */
+  async checkHasRegisteredAdminAsync(): Promise<{ hasAdmin: boolean; info?: { usuario: string; nome: string; registeredAt: string } | null }> {
+    try {
+      const res = await fetch('/api/admin/info');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.hasAdmin && data.info) {
+          // Se o servidor tem admin e o local ainda não tem o registro visual, salvamos o indicador
+          const localRaw = localStorage.getItem(ADMIN_MASTER_KEY);
+          if (!localRaw) {
+            localStorage.setItem(
+              ADMIN_MASTER_KEY,
+              JSON.stringify({
+                usuario: data.info.usuario,
+                nome: data.info.nome,
+                senhaHash: '',
+                registeredAt: data.info.registeredAt,
+              })
+            );
+          }
+          return { hasAdmin: true, info: data.info };
+        }
+      }
+    } catch {
+      // Falha de rede, recorre ao armazenamento local
+    }
+
+    // Fallback local
+    const hasLocal = this.hasRegisteredAdmin();
+    const info = this.getRegisteredAdminInfo();
+
+    // Se temos admin local mas o servidor talvez não saiba ainda, enviamos em segundo plano
+    if (hasLocal) {
+      try {
+        const rawLocal = localStorage.getItem(ADMIN_MASTER_KEY);
+        if (rawLocal) {
+          fetch('/api/admin/sync-master', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ master: JSON.parse(rawLocal) }),
+          }).catch(() => {});
+        }
+      } catch {}
+    }
+
+    return { hasAdmin: hasLocal, info };
   },
 
   /**
@@ -271,12 +321,32 @@ export const dbService = {
   },
 
   /**
-   * Cadastra o primeiro administrador definitivo do sistema
+   * Cadastra o primeiro administrador definitivo do sistema.
+   * REGRA: Apenas 1 conta pode ser criada. Se já houver uma, bloqueia.
    */
-  registerDefinitiveAdmin(usuario: string, senha: string, nome?: string): AdminUser {
+  async registerDefinitiveAdmin(usuario: string, senha: string, nome?: string): Promise<AdminUser> {
     const cleanUser = usuario.trim();
     const cleanNome = nome?.trim() || 'Administrador VLI';
     const nowIso = new Date().toISOString();
+
+    // 1. Tentar registrar no servidor primeiro para garantir a unicidade absoluta
+    try {
+      const resp = await fetch('/api/admin/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usuario: cleanUser, senha, nome: cleanNome }),
+      });
+
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}));
+        throw new Error(errData.error || 'Não é permitido criar outra conta de administrador.');
+      }
+    } catch (apiErr: any) {
+      if (apiErr.message && apiErr.message.includes('Já existe um administrador')) {
+        throw apiErr;
+      }
+      // Se for falha de rede/offline, continua e salva localmente
+    }
 
     const masterCred: MasterAdminCredential = {
       usuario: cleanUser,
@@ -303,6 +373,7 @@ export const dbService = {
   /**
    * Realiza login administrativo.
    * Se for o primeiro login do sistema, define automaticamente as credenciais informadas como DEFINITIVAS.
+   * Após essa criação, nenhuma outra conta pode ser cadastrada.
    */
   async loginAdmin(
     usuario: string,
@@ -313,7 +384,17 @@ export const dbService = {
       return { success: false, error: 'Preencha o usuário e a senha.' };
     }
 
-    const hasAdmin = this.hasRegisteredAdmin();
+    // Validação com o servidor se já existe administrador
+    let hasAdmin = this.hasRegisteredAdmin();
+    try {
+      const serverCheck = await fetch('/api/admin/info');
+      if (serverCheck.ok) {
+        const serverData = await serverCheck.json();
+        if (serverData.hasAdmin) {
+          hasAdmin = true;
+        }
+      }
+    } catch {}
 
     // 1. PRIMEIRO ACESSO: O primeiro login cadastra o administrador definitivo
     if (!hasAdmin) {
@@ -324,15 +405,48 @@ export const dbService = {
         };
       }
 
-      const registeredUser = this.registerDefinitiveAdmin(cleanUser, senha);
-      return {
-        success: true,
-        user: registeredUser,
-        isFirstAdminRegistered: true,
-      };
+      try {
+        const registeredUser = await this.registerDefinitiveAdmin(cleanUser, senha);
+        return {
+          success: true,
+          user: registeredUser,
+          isFirstAdminRegistered: true,
+        };
+      } catch (regErr: any) {
+        return {
+          success: false,
+          error: regErr.message || 'Erro ao registrar administrador único.',
+        };
+      }
     }
 
-    // 2. ACESSOS POSTERIORES: Valida estritamente contra o Administrador Definitivo Cadastrado
+    // 2. ACESSOS POSTERIORES: Valida contra o Administrador Definitivo Cadastrado
+    // Primeiro tenta autenticar com o servidor
+    try {
+      const srvLogin = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usuario: cleanUser, senha }),
+      });
+
+      if (srvLogin.ok) {
+        const srvData = await srvLogin.json();
+        if (srvData.success && srvData.user) {
+          localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(srvData.user));
+          return { success: true, user: srvData.user };
+        }
+      } else {
+        const srvErr = await srvLogin.json().catch(() => ({}));
+        if (srvLogin.status === 401 || srvLogin.status === 403) {
+          return {
+            success: false,
+            error: srvErr.error || 'Usuário ou senha incorretos. Apenas o administrador definitivo tem acesso.',
+          };
+        }
+      }
+    } catch {}
+
+    // Validação local de fallback
     try {
       const rawMaster = localStorage.getItem(ADMIN_MASTER_KEY);
       if (rawMaster) {
@@ -365,33 +479,9 @@ export const dbService = {
       console.error('Erro na validação do administrador definitivo:', e);
     }
 
-    // Opcional: validação via Supabase Auth se o cliente estiver conectado
-    const supabase = getSupabase();
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: cleanUser,
-          password: senha,
-        });
-
-        if (!error && data.user) {
-          const userSession: AdminUser = {
-            id: data.user.id,
-            email: data.user.email || cleanUser,
-            nome: data.user.user_metadata?.nome || 'Administrador VLI',
-            role: 'admin',
-          };
-          localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify(userSession));
-          return { success: true, user: userSession };
-        }
-      } catch (err) {
-        console.warn('Falha na autenticação remota Supabase:', err);
-      }
-    }
-
     return {
       success: false,
-      error: 'Usuário ou senha incorretos. Apenas o administrador definitivo tem acesso.',
+      error: 'Usuário ou senha incorretos. Apenas a conta administradora cadastrada tem permissão de acesso.',
     };
   },
 

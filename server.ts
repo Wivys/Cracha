@@ -27,8 +27,32 @@ async function startServer() {
 
   const colaboradoresFile = path.join(dataDir, 'colaboradores.json');
   const catalogoCursosFile = path.join(dataDir, 'catalogo_cursos.json');
+  const adminMasterFile = path.join(dataDir, 'admin_master.json');
 
   // Helpers de leitura e escrita com tratamento de erro
+  const readAdminMaster = (): any | null => {
+    try {
+      if (fs.existsSync(adminMasterFile)) {
+        const raw = fs.readFileSync(adminMasterFile, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && parsed.usuario) {
+          return parsed;
+        }
+      }
+    } catch (err) {
+      console.warn('Aviso ao ler admin_master.json:', err);
+    }
+    return null;
+  };
+
+  const writeAdminMaster = (data: any) => {
+    try {
+      fs.writeFileSync(adminMasterFile, JSON.stringify(data, null, 2), 'utf-8');
+    } catch (err) {
+      console.error('Erro ao escrever em admin_master.json:', err);
+    }
+  };
+
   const readColaboradores = (): any[] => {
     try {
       if (fs.existsSync(colaboradoresFile)) {
@@ -76,6 +100,130 @@ async function startServer() {
   // Rota de verificação de integridade
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  // 0. Autenticação e Gestão de Conta Única de Administrador (Definitiva)
+  // Regra de Negócio Estrita: Apenas 1 conta de Administrador pode ser criada no sistema.
+  // Após a criação da primeira conta, nenhuma outra conta pode ser cadastrada.
+  app.get('/api/admin/info', (_req, res) => {
+    const master = readAdminMaster();
+    if (master && master.usuario) {
+      return res.json({
+        success: true,
+        hasAdmin: true,
+        info: {
+          usuario: master.usuario,
+          nome: master.nome || 'Administrador VLI',
+          registeredAt: master.registeredAt,
+        },
+      });
+    }
+    return res.json({ success: true, hasAdmin: false, info: null });
+  });
+
+  app.post('/api/admin/register', (req, res) => {
+    const existing = readAdminMaster();
+    if (existing && existing.usuario) {
+      return res.status(403).json({
+        success: false,
+        error: 'Já existe um administrador cadastrado no sistema. Não é permitido criar outra conta de administrador.',
+      });
+    }
+
+    const { usuario, senha, nome } = req.body || {};
+    const cleanUser = typeof usuario === 'string' ? usuario.trim() : '';
+    const cleanPass = typeof senha === 'string' ? senha : '';
+    const cleanNome = typeof nome === 'string' && nome.trim() ? nome.trim() : 'Administrador VLI';
+
+    if (!cleanUser || !cleanPass) {
+      return res.status(400).json({ success: false, error: 'Usuário e senha são obrigatórios.' });
+    }
+
+    if (cleanPass.length < 4) {
+      return res.status(400).json({ success: false, error: 'A senha deve ter no mínimo 4 caracteres.' });
+    }
+
+    const nowIso = new Date().toISOString();
+    const newMaster = {
+      usuario: cleanUser,
+      senhaHash: cleanPass,
+      nome: cleanNome,
+      registeredAt: nowIso,
+    };
+
+    writeAdminMaster(newMaster);
+
+    const userSession = {
+      id: `admin-definitive-${Date.now()}`,
+      email: cleanUser.includes('@') ? cleanUser : `${cleanUser}@vli-logistica.com.br`,
+      nome: cleanNome,
+      role: 'admin',
+      definitive: true,
+      registeredAt: nowIso,
+    };
+
+    console.log(`[Admin Unico] Primeira e única conta de Administrador registrada: "${cleanUser}" em ${nowIso}`);
+    return res.json({ success: true, user: userSession, isFirstAdminRegistered: true });
+  });
+
+  app.post('/api/admin/login', (req, res) => {
+    const { usuario, senha } = req.body || {};
+    const cleanUser = typeof usuario === 'string' ? usuario.trim() : '';
+    const cleanPass = typeof senha === 'string' ? senha : '';
+
+    if (!cleanUser || !cleanPass) {
+      return res.status(400).json({ success: false, error: 'Preencha o usuário e a senha.' });
+    }
+
+    const master = readAdminMaster();
+    if (!master || !master.usuario) {
+      // Nenhum admin criado ainda
+      return res.status(404).json({
+        success: false,
+        error: 'Nenhum administrador cadastrado ainda no sistema. Realize o primeiro acesso para configurar a conta única.',
+        hasAdmin: false,
+      });
+    }
+
+    const userMatches =
+      master.usuario.toLowerCase() === cleanUser.toLowerCase() ||
+      master.usuario.toLowerCase().split('@')[0] === cleanUser.toLowerCase().split('@')[0];
+
+    const passwordMatches = master.senhaHash === cleanPass;
+
+    if (userMatches && passwordMatches) {
+      const userSession = {
+        id: 'admin-definitive',
+        email: master.usuario.includes('@') ? master.usuario : `${master.usuario}@vli-logistica.com.br`,
+        nome: master.nome || 'Administrador VLI',
+        role: 'admin',
+        definitive: true,
+        registeredAt: master.registeredAt,
+      };
+      return res.json({ success: true, user: userSession });
+    }
+
+    return res.status(401).json({
+      success: false,
+      error: 'Usuário ou senha incorretos. Apenas a conta administradora cadastrada tem acesso.',
+    });
+  });
+
+  app.post('/api/admin/sync-master', (req, res) => {
+    // Sincroniza se o cliente já tiver um admin master local anterior
+    const existing = readAdminMaster();
+    if (existing && existing.usuario) {
+      return res.json({ success: true, message: 'Admin já existente no servidor.', master: existing });
+    }
+
+    const { master } = req.body || {};
+    if (master && master.usuario && master.senhaHash) {
+      writeAdminMaster(master);
+      console.log(`[Admin Unico] Sincronizado do cliente o Administrador único: "${master.usuario}"`);
+      return res.json({ success: true, message: 'Admin sincronizado com sucesso.' });
+    }
+
+    return res.status(400).json({ success: false, error: 'Dados inválidos para sincronização.' });
   });
 
   // 1. Listar todos os colaboradores

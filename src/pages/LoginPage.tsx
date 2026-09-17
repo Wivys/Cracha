@@ -42,13 +42,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [showLinkInput, setShowLinkInput] = useState(false);
   const [directLinkInput, setDirectLinkInput] = useState('');
 
-  // Verifica se já existe um administrador permanente cadastrado
+  // Verifica se já existe um administrador permanente cadastrado (local e servidor)
   useEffect(() => {
+    // 1. Verificação síncrona imediata
     const isRegistered = dbService.hasRegisteredAdmin();
     setHasMasterAdmin(isRegistered);
     if (isRegistered) {
       setAdminInfo(dbService.getRegisteredAdminInfo());
     }
+
+    // 2. Verificação assíncrona garantindo sincronização com o servidor
+    dbService.checkHasRegisteredAdminAsync().then(({ hasAdmin, info }) => {
+      setHasMasterAdmin(hasAdmin);
+      if (info) {
+        setAdminInfo(info);
+      }
+    });
   }, []);
 
   // Submissão do login administrativo
@@ -169,11 +178,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               </div>
               <div>
                 <h2 className="text-sm sm:text-base font-extrabold tracking-tight">
-                  {hasMasterAdmin ? 'Login Administrativo' : 'Cadastro de Administrador'}
+                  {hasMasterAdmin ? 'Login Administrativo' : 'Criar Conta de Administrador'}
                 </h2>
                 {!hasMasterAdmin && (
                   <span className="text-[10px] text-[#FFB81C] font-bold block uppercase tracking-wider">
-                    Primeiro Acesso Definitivo
+                    Conta Única Definitiva (Apenas 1 permitida)
                   </span>
                 )}
               </div>
@@ -181,7 +190,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
             {hasMasterAdmin && (
               <span className="inline-flex items-center gap-1 text-[9px] font-bold bg-white/10 text-amber-300 px-2 py-0.5 rounded-full border border-white/20">
-                <UserCheck className="w-2.5 h-2.5" /> Definitivo
+                <UserCheck className="w-2.5 h-2.5" /> Administrador Único
               </span>
             )}
           </div>
@@ -194,14 +203,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({
             <div className="bg-amber-50/80 px-5 py-3 border-b border-amber-200/80 text-[11px] text-amber-950 flex items-start gap-2">
               <KeyRound className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
               <div>
-                <strong className="font-bold text-amber-900">Primeiro Acesso:</strong> O usuário e senha inseridos agora serão salvos como as credenciais <strong>definitivas</strong> do administrador deste sistema.
+                <strong className="font-bold text-amber-900">Conta de Administrador Única:</strong> Após cadastrar este primeiro administrador, <span className="underline font-bold">não será permitido criar nenhuma outra conta de administrador</span>. Guarde bem seu usuário e senha.
               </div>
             </div>
           ) : (
-            <div className="bg-slate-50 px-5 py-2 border-b border-slate-100 text-[11px] text-slate-500 flex items-center justify-between">
-              <span>Administrador configurado</span>
-              <span className="font-mono text-[10px] text-[#002B49] font-bold">
-                {adminInfo?.usuario ? `(${adminInfo.usuario})` : 'Ativo'}
+            <div className="bg-slate-50 px-5 py-2.5 border-b border-slate-100 text-[11px] text-slate-600 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                Administrador único registrado
+              </span>
+              <span className="font-mono text-[10px] text-[#002B49] font-bold bg-slate-200/70 px-2 py-0.5 rounded">
+                {adminInfo?.usuario ? `@${adminInfo.usuario}` : 'Ativo'}
               </span>
             </div>
           )}
@@ -255,8 +267,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({
                 {adminLoading
                   ? 'Processando...'
                   : hasMasterAdmin
-                  ? 'Entrar no Painel'
-                  : 'Cadastrar Administrador e Acessar'}
+                  ? 'Entrar no Painel ADM'
+                  : 'Criar Administrador Único e Acessar'}
               </span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
