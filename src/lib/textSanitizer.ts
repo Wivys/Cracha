@@ -243,11 +243,25 @@ export function repairFuncionarioObject<T extends Record<string, any>>(func: T):
     local: repairCorruptedText(func.local),
     webtraining_url: func.webtraining_url ? String(func.webtraining_url).trim() : undefined,
     last_webtraining_sync: func.last_webtraining_sync ? String(func.last_webtraining_sync).trim() : undefined,
+    genero: func.genero || 'H',
   };
 
+  // Se unidade tiver embutida a metadata de gênero
+  if (typeof func.unidade === 'string' && func.unidade.includes('|| genero:')) {
+    const parts = func.unidade.split('|| genero:');
+    repaired.unidade = parts[0].trim();
+    const rest = parts[1]?.trim();
+    if (rest) {
+      const g = rest.charAt(0).toUpperCase();
+      if (g === 'M' || g === 'H') {
+        repaired.genero = g;
+      }
+    }
+  }
+
   // Se unidade tiver embutida a metadata de sincronização da Universidade VLI
-  if (typeof func.unidade === 'string' && func.unidade.includes('|| webtraining:')) {
-    const [realUnidade, metaStr] = func.unidade.split('|| webtraining:');
+  if (typeof (repaired.unidade || func.unidade) === 'string' && (repaired.unidade || func.unidade).includes('|| webtraining:')) {
+    const [realUnidade, metaStr] = (repaired.unidade || func.unidade).split('|| webtraining:');
     repaired.unidade = repairCorruptedText(realUnidade.trim());
     try {
       const meta = JSON.parse(metaStr.trim());
@@ -260,8 +274,10 @@ export function repairFuncionarioObject<T extends Record<string, any>>(func: T):
     } catch {
       // Ignora erro de parse na metadata
     }
-  } else {
+  } else if (!repaired.unidade) {
     repaired.unidade = repairCorruptedText(func.unidade);
+  } else {
+    repaired.unidade = repairCorruptedText(repaired.unidade);
   }
 
   if (Array.isArray(repaired.treinamentos)) {

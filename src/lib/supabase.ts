@@ -189,6 +189,14 @@ export const saveLocalStore = (data: FuncionarioWithTreinamentos[]) => {
 };
 
 /**
+ * Verifica se uma string possui o formato válido de UUID do Postgres
+ */
+export function isUuid(val?: string | null): boolean {
+  if (!val || typeof val !== 'string') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(val.trim());
+}
+
+/**
  * Formata datas com segurança para o tipo DATE do Postgres / Supabase
  * Converte DD/MM/AAAA para YYYY-MM-DD e valores infinitos/indeterminados para '2099-12-31'
  */
@@ -573,13 +581,31 @@ export const dbService = {
     const supabase = getSupabase();
     if (supabase) {
       try {
-        const { data: func, error } = await supabase
-          .from('funcionarios')
-          .select('*')
-          .or(`id.eq.${idOrMatricula},matricula.ilike.${idOrMatricula}`)
-          .maybeSingle();
+        let func: any = null;
 
-        if (error && error.code !== 'PGRST116') throw error;
+        // Se a busca for um UUID válido, consulta diretamente pelo ID
+        if (isUuid(idOrMatricula)) {
+          const { data, error } = await supabase
+            .from('funcionarios')
+            .select('*')
+            .eq('id', idOrMatricula.trim())
+            .maybeSingle();
+          if (!error && data) {
+            func = data;
+          }
+        }
+
+        // Se não encontrou por ID (ou não era UUID), busca pela matrícula
+        if (!func) {
+          const { data, error } = await supabase
+            .from('funcionarios')
+            .select('*')
+            .ilike('matricula', idOrMatricula.trim())
+            .maybeSingle();
+          if (!error && data) {
+            func = data;
+          }
+        }
 
         if (func) {
           const { data: trainings } = await supabase
@@ -700,19 +726,34 @@ export const dbService = {
     if (supabase) {
       try {
         // Verifica se já existe colaborador com mesma matrícula ou ID
-        let queryBuilder = supabase.from('funcionarios').select('id, matricula');
-        if (data.id && cleanMatricula) {
-          queryBuilder = queryBuilder.or(`id.eq.${data.id},matricula.ilike.${cleanMatricula}`);
-        } else if (cleanMatricula) {
-          queryBuilder = queryBuilder.ilike('matricula', cleanMatricula);
-        } else if (data.id) {
-          queryBuilder = queryBuilder.eq('id', data.id);
+        let existingFunc: any = null;
+
+        if (data.id && isUuid(data.id)) {
+          const { data: recs } = await supabase
+            .from('funcionarios')
+            .select('id, matricula')
+            .eq('id', data.id.trim())
+            .limit(1);
+          if (recs && recs.length > 0) {
+            existingFunc = recs[0];
+          }
         }
 
-        const { data: existingRecords } = await queryBuilder.limit(1);
-        const existingFunc = Array.isArray(existingRecords) && existingRecords.length > 0 ? existingRecords[0] : null;
+        if (!existingFunc && cleanMatricula) {
+          const { data: recs } = await supabase
+            .from('funcionarios')
+            .select('id, matricula')
+            .ilike('matricula', cleanMatricula)
+            .limit(1);
+          if (recs && recs.length > 0) {
+            existingFunc = recs[0];
+          }
+        }
 
         let unidadePayload = (data.unidade || 'Malha Operacional VLI').trim();
+        if (data.genero) {
+          unidadePayload += ` || genero:${data.genero}`;
+        }
         if (data.webtraining_url) {
           unidadePayload += ` || webtraining:${JSON.stringify({
             url: data.webtraining_url.trim(),
@@ -726,52 +767,33 @@ export const dbService = {
           foto_url: data.foto_url || null,
           cargo: data.cargo || 'Operador Ferroviário / Logística',
           unidade: unidadePayload,
-          genero: data.genero || 'H',
         };
 
         let savedSupabaseFunc: any = null;
 
         if (existingFunc) {
           supabaseFuncId = existingFunc.id;
-          let updateRes = await supabase
+          const { data: updateData, error: updateErr } = await supabase
             .from('funcionarios')
             .update(payload)
             .eq('id', existingFunc.id)
             .select()
             .maybeSingle();
 
-          // Se falhou por ausência de 'genero' na tabela do Supabase
-          if (updateRes.error && updateRes.error.code === '42703') {
-            delete payload.genero;
-            updateRes = await supabase
-              .from('funcionarios')
-              .update(payload)
-              .eq('id', existingFunc.id)
-              .select()
-              .maybeSingle();
-          }
-
-          if (updateRes.error) throw updateRes.error;
-          savedSupabaseFunc = updateRes.data || { ...existingFunc, ...payload };
+          if (updateErr) throw updateErr;
+          savedSupabaseFunc = updateData || { ...existingFunc, ...payload };
         } else {
-          let insertRes = await supabase
+          if (data.id && isUuid(data.id)) {
+            payload.id = data.id.trim();
+          }
+          const { data: insertData, error: insertErr } = await supabase
             .from('funcionarios')
             .insert(payload)
             .select()
             .maybeSingle();
 
-          // Se falhou por ausência de 'genero' na tabela do Supabase
-          if (insertRes.error && insertRes.error.code === '42703') {
-            delete payload.genero;
-            insertRes = await supabase
-              .from('funcionarios')
-              .insert(payload)
-              .select()
-              .maybeSingle();
-          }
-
-          if (insertRes.error) throw insertRes.error;
-          savedSupabaseFunc = insertRes.data;
+          if (insertErr) throw insertErr;
+          savedSupabaseFunc = insertData;
           supabaseFuncId = savedSupabaseFunc?.id || null;
         }
 
@@ -911,9 +933,24 @@ export const dbService = {
     const supabase = getSupabase();
     if (supabase) {
       try {
-        await supabase.from('treinamentos').delete().eq('funcionario_id', id);
-        const { error } = await supabase.from('funcionarios').delete().eq('id', id);
-        if (error) throw error;
+        let targetUuid: string | null = isUuid(id) ? id.trim() : null;
+
+        if (!targetUuid) {
+          const { data: recs } = await supabase
+            .from('funcionarios')
+            .select('id')
+            .ilike('matricula', id.trim())
+            .limit(1);
+          if (recs && recs.length > 0) {
+            targetUuid = recs[0].id;
+          }
+        }
+
+        if (targetUuid) {
+          await supabase.from('treinamentos').delete().eq('funcionario_id', targetUuid);
+          const { error } = await supabase.from('funcionarios').delete().eq('id', targetUuid);
+          if (error) throw error;
+        }
       } catch (err) {
         console.warn('Erro ao deletar no Supabase:', err);
       }
