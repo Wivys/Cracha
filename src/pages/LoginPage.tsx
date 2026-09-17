@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { VliLogo } from '../components/VliLogo';
-import { Lock, QrCode, ArrowRight, ShieldCheck, UserCheck, KeyRound, Upload, Cloud, CloudOff } from 'lucide-react';
+import { Lock, QrCode, ArrowRight, Upload, Cloud, CloudOff } from 'lucide-react';
 import { dbService, isCloudConnected } from '../lib/supabase';
 import { AdminUser } from '../types';
 
@@ -31,7 +31,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
   const [adminPassword, setAdminPassword] = useState('');
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminError, setAdminError] = useState<string | null>(null);
-  const [firstAdminSuccessMsg, setFirstAdminSuccessMsg] = useState<string | null>(null);
 
   // Estados do acesso do colaborador
   const [matriculaInput, setMatriculaInput] = useState('');
@@ -74,9 +73,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({
     try {
       const res = await dbService.loginAdmin(adminEmail, adminPassword);
       if (res.success && res.user) {
-        if (res.isFirstAdminRegistered) {
-          setFirstAdminSuccessMsg('Administrador definitivo cadastrado com sucesso!');
-        }
         onAdminLoginSuccess(res.user);
       } else {
         setAdminError(res.error || 'Credenciais inválidas. Tente novamente.');
@@ -168,66 +164,31 @@ export const LoginPage: React.FC<LoginPageProps> = ({
           <VliLogo size="lg" />
         </div>
 
-        {/* CARD 1: Login Administrativo (Com suporte a Primeiro Acesso Definitivo) */}
+        {/* CARD 1: Login Administrativo */}
         <div className="w-full bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
           {/* Cabeçalho do Card */}
-          <div className="bg-[#002B49] text-white px-5 py-3.5 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-7 h-7 rounded-lg border border-white/30 flex items-center justify-center shrink-0">
-                {hasMasterAdmin ? <Lock className="w-4 h-4 text-white" /> : <ShieldCheck className="w-4 h-4 text-[#FFB81C]" />}
-              </div>
-              <div>
-                <h2 className="text-sm sm:text-base font-extrabold tracking-tight">
-                  {hasMasterAdmin ? 'Login Administrativo' : 'Criar Conta de Administrador'}
-                </h2>
-                {!hasMasterAdmin && (
-                  <span className="text-[10px] text-[#FFB81C] font-bold block uppercase tracking-wider">
-                    Conta Única Definitiva (Apenas 1 permitida)
-                  </span>
-                )}
-              </div>
+          <div className="bg-[#002B49] text-white px-5 py-3.5 flex items-center gap-3">
+            <div className="w-7 h-7 rounded-lg border border-white/30 flex items-center justify-center shrink-0">
+              <Lock className="w-4 h-4 text-white" />
             </div>
-
-            {hasMasterAdmin && (
-              <span className="inline-flex items-center gap-1 text-[9px] font-bold bg-white/10 text-amber-300 px-2 py-0.5 rounded-full border border-white/20">
-                <UserCheck className="w-2.5 h-2.5" /> Administrador Único
-              </span>
-            )}
+            <h2 className="text-sm sm:text-base font-extrabold tracking-tight">
+              Login Administrativo
+            </h2>
           </div>
 
           {/* Faixa divisória amarela */}
           <div className="h-1 bg-[#FFB81C] w-full" />
 
-          {/* Mensagem explicativa se for o primeiro acesso */}
-          {!hasMasterAdmin ? (
-            <div className="bg-amber-50/80 px-5 py-3 border-b border-amber-200/80 text-[11px] text-amber-950 flex items-start gap-2">
-              <KeyRound className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-              <div>
-                <strong className="font-bold text-amber-900">Conta de Administrador Única:</strong> Após cadastrar este primeiro administrador, <span className="underline font-bold">não será permitido criar nenhuma outra conta de administrador</span>. Guarde bem seu usuário e senha.
-              </div>
-            </div>
-          ) : (
-            <div className="bg-slate-50 px-5 py-2.5 border-b border-slate-100 text-[11px] text-slate-600 flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
-                Administrador único registrado
-              </span>
-              <span className="font-mono text-[10px] text-[#002B49] font-bold bg-slate-200/70 px-2 py-0.5 rounded">
-                {adminInfo?.usuario ? `@${adminInfo.usuario}` : 'Ativo'}
-              </span>
-            </div>
-          )}
-
-          {/* Formulário de Login / Cadastro de Administrador */}
+          {/* Formulário de Login Administrativo */}
           <form onSubmit={handleAdminSubmit} className="p-5 space-y-3.5">
             <div>
               <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                {hasMasterAdmin ? 'Usuário ou E-mail' : 'Defina seu Usuário ou E-mail'}
+                Usuário ou E-mail
               </label>
               <input
                 id="admin-usuario-input"
                 type="text"
-                placeholder={hasMasterAdmin ? 'Digite seu usuário' : 'Ex: admin ou seu.email@vli.com.br'}
+                placeholder="Digite seu usuário ou e-mail"
                 value={adminEmail}
                 onChange={(e) => setAdminEmail(e.target.value)}
                 className="w-full px-4 py-2.5 bg-slate-50/70 border border-slate-300 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-[#002B49] focus:outline-none transition-all"
@@ -237,12 +198,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
 
             <div>
               <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-                {hasMasterAdmin ? 'Senha de Acesso' : 'Defina sua Senha Definitiva'}
+                Senha de Acesso
               </label>
               <input
                 id="admin-senha-input"
                 type="password"
-                placeholder={hasMasterAdmin ? 'Digite sua senha' : 'Mínimo de 4 caracteres'}
+                placeholder="Digite sua senha"
                 value={adminPassword}
                 onChange={(e) => setAdminPassword(e.target.value)}
                 className="w-full px-4 py-2.5 bg-slate-50/70 border border-slate-300 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-[#002B49] focus:outline-none transition-all"
@@ -254,22 +215,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({
               <p className="text-xs text-rose-600 font-semibold px-1">{adminError}</p>
             )}
 
-            {firstAdminSuccessMsg && (
-              <p className="text-xs text-emerald-600 font-semibold px-1">{firstAdminSuccessMsg}</p>
-            )}
-
             <button
               type="submit"
               disabled={adminLoading}
               className="w-full py-2.5 bg-[#002B49] hover:bg-blue-950 text-white font-bold text-xs sm:text-sm rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
             >
-              <span>
-                {adminLoading
-                  ? 'Processando...'
-                  : hasMasterAdmin
-                  ? 'Entrar no Painel ADM'
-                  : 'Criar Administrador Único e Acessar'}
-              </span>
+              <span>{adminLoading ? 'Acessando...' : 'Entrar no Painel ADM'}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </form>
