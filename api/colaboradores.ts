@@ -1,35 +1,18 @@
-import fs from 'fs';
-import path from 'path';
+import { createClient } from '@supabase/supabase-js';
 
-// Em ambientes serverless (Vercel), /tmp é gravável
-const TMP_FILE = path.join('/tmp', 'vli_colaboradores.json');
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || 'https://geaypypffqpmynfxdaul.supabase.co';
+const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdlYXlweXBmZnFwbXluZnhkYXVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5MTc5NDcsImV4cCI6MjEwNDQ5Mzk0N30.v9ztxM67zF4nAVdHsUip2NoCstjKq5dPi3HsXWsq8og';
 
-// Memória em cache para instâncias ativas
-let memoryCache: any[] = [];
-
-function readStore(): any[] {
-  try {
-    if (fs.existsSync(TMP_FILE)) {
-      const content = fs.readFileSync(TMP_FILE, 'utf-8');
-      const parsed = JSON.parse(content);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        memoryCache = parsed;
-        return parsed;
-      }
+let supabaseClient: any = null;
+function getClient() {
+  if (!supabaseClient && SUPABASE_URL && SUPABASE_KEY) {
+    try {
+      supabaseClient = createClient(SUPABASE_URL, SUPABASE_KEY);
+    } catch (e) {
+      console.warn('Erro ao inicializar Supabase no handler API:', e);
     }
-  } catch (e) {
-    console.warn('Aviso ao ler /tmp/vli_colaboradores.json:', e);
   }
-  return memoryCache;
-}
-
-function writeStore(data: any[]): void {
-  try {
-    memoryCache = data;
-    fs.writeFileSync(TMP_FILE, JSON.stringify(data, null, 2), 'utf-8');
-  } catch (e) {
-    console.warn('Aviso ao gravar em /tmp/vli_colaboradores.json:', e);
-  }
+  return supabaseClient;
 }
 
 export default async function handler(req: any, res: any) {
@@ -42,104 +25,113 @@ export default async function handler(req: any, res: any) {
     return res.status(200).end();
   }
 
-  const currentList = readStore();
+  const supabase = getClient();
 
-  // GET: Listar ou buscar por id / matricula
+  // GET: Buscar colaborador por ID ou Matrícula
   if (req.method === 'GET') {
     const queryParam = (
       req.query?.idOrMatricula ||
       req.query?.matricula ||
       req.query?.id ||
       ''
-    ).trim().toLowerCase();
+    ).trim();
 
-    if (queryParam) {
-      const cleanDigits = queryParam.replace(/\D/g, '');
-      const found = currentList.find((c: any) => {
-        if (!c) return false;
-        const cId = String(c.id || '').toLowerCase();
-        const cMat = String(c.matricula || '').toLowerCase();
-        const cDigits = cMat.replace(/\D/g, '');
-        return (
-          cId === queryParam ||
-          cMat === queryParam ||
-          (cleanDigits.length > 0 && cDigits === cleanDigits)
-        );
-      });
+    if (queryParam && supabase) {
+      try {
+        const { data: func } = await supabase
+          .from('funcionarios')
+          .select('*')
+          .or(`id.eq.${queryParam},matricula.ilike.${queryParam}`)
+          .maybeSingle();
 
-      if (found) {
-        return res.status(200).json({ success: true, data: found });
+        if (func) {
+          const { data: trainings } = await supabase
+            .from('treinamentos')
+            .select('*')
+            .eq('funcionario_id', func.id);
+
+          return res.status(200).json({
+            success: true,
+            data: {
+              ...func,
+              treinamentos: trainings || [],
+            },
+          });
+        }
+      } catch (err: any) {
+        console.warn('Erro na busca Supabase:', err.message);
       }
 
       return res.status(404).json({
         success: false,
-        error: `Colaborador com identificação "${queryParam}" não encontrado no servidor.`,
+        error: `Colaborador "${queryParam}" não encontrado.`,
       });
     }
 
-    return res.status(200).json({ success: true, data: currentList });
+    // Se não passou query, lista todos
+    if (supabase) {
+      try {
+        const { data: funcs } = await supabase.from('funcionarios').select('*');
+        return res.status(200).json({ success: true, data: funcs || [] });
+      } catch (err: any) {
+        return res.status(500).json({ success: false, error: err.message });
+      }
+    }
+
+    return res.status(200).json({ success: true, data: [] });
   }
 
-  // POST: Salvar ou sincronizar colaboradores
+  // POST: Salvar colaborador
   if (req.method === 'POST') {
     const body = req.body || {};
+    if (body.nome && body.matricula && supabase) {
+      try {
+        const payload = {
+          nome: body.nome.trim(),
+          matricula: body.matricula.trim(),
+          cargo: body.cargo || 'Operação Ferroviária & Logística',
+          unidade: body.unidade || 'Corredor Centro-Leste',
+          foto_url: body.foto_url || null,
+          genero: body.genero || 'H',
+        };
 
-    // 1. Sincronização em lote
-    if (Array.isArray(body.colaboradores)) {
-      const map = new Map<string, any>();
-      currentList.forEach((c) => {
-        const key = String(c.matricula || c.id || '').toLowerCase();
-        if (key) map.set(key, c);
-      });
+        const { data: existing } = await supabase
+          .from('funcionarios')
+          .select('id')
+          .or(`matricula.ilike.${body.matricula}`)
+          .maybeSingle();
 
-      body.colaboradores.forEach((c: any) => {
-        const key = String(c.matricula || c.id || '').toLowerCase();
-        if (key) {
-          const existing = map.get(key);
-          map.set(key, { ...existing, ...c });
+        let funcId = existing?.id;
+        if (funcId) {
+          await supabase.from('funcionarios').update(payload).eq('id', funcId);
+        } else {
+          const { data: inserted } = await supabase.from('funcionarios').insert(payload).select('id').maybeSingle();
+          funcId = inserted?.id || `vli-${body.matricula}`;
         }
-      });
 
-      const updated = Array.from(map.values());
-      writeStore(updated);
-      return res.status(200).json({ success: true, count: updated.length, data: updated });
-    }
+        if (funcId && Array.isArray(body.treinamentos)) {
+          await supabase.from('treinamentos').delete().eq('funcionario_id', funcId);
+          if (body.treinamentos.length > 0) {
+            const trns = body.treinamentos.map((t: any) => ({
+              funcionario_id: funcId,
+              nome_curso: t.nome_curso,
+              data_validade: t.data_validade,
+              status: t.status === 'vencido' ? 'vencido' : 'valido',
+              carga_horaria: t.carga_horaria || '20h',
+              origem: t.origem || 'manual',
+              categoria: t.categoria || null,
+            }));
+            await supabase.from('treinamentos').insert(trns);
+          }
+        }
 
-    // 2. Colaborador único
-    if (body.nome && body.matricula) {
-      const id = body.id || `vli-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
-      const fullRecord = {
-        ...body,
-        id,
-        created_at: body.created_at || new Date().toISOString(),
-        treinamentos: Array.isArray(body.treinamentos) ? body.treinamentos : [],
-      };
-
-      const targetMat = String(body.matricula).toLowerCase();
-      const targetId = String(id).toLowerCase();
-
-      const index = currentList.findIndex(
-        (c: any) =>
-          (c.id && String(c.id).toLowerCase() === targetId) ||
-          (c.matricula && String(c.matricula).toLowerCase() === targetMat)
-      );
-
-      let updatedList: any[];
-      if (index >= 0) {
-        updatedList = [...currentList];
-        updatedList[index] = { ...updatedList[index], ...fullRecord };
-      } else {
-        updatedList = [fullRecord, ...currentList];
+        return res.status(200).json({ success: true, id: funcId });
+      } catch (err: any) {
+        console.warn('Erro ao salvar no Supabase via API:', err.message);
       }
-
-      writeStore(updatedList);
-      return res.status(200).json({ success: true, data: fullRecord });
     }
 
-    return res.status(400).json({
-      success: false,
-      error: 'Formato de dados inválido para salvar colaborador.',
-    });
+    return res.status(200).json({ success: true, received: true });
   }
 
   return res.status(405).json({ error: 'Method not allowed' });

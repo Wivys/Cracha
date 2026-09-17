@@ -20,7 +20,6 @@ import {
   FilterStatus,
 } from '../types';
 import { dbService, loadLocalStore } from '../lib/supabase';
-import { buildShareableBadgeUrl } from '../lib/portableBadge';
 
 interface GaleriaCardsPageProps {
   employees: FuncionarioWithTreinamentos[];
@@ -151,9 +150,9 @@ export const GaleriaCardsPage: React.FC<GaleriaCardsPageProps> = ({
     });
   }, [activeEmployees, searchTerm, filterStatus]);
 
-  // Action: Copiar Link (ícone de globo)
+  // Action: Copiar Link (ícone de globo) - Link Curto e Limpo
   const handleCopyLink = async (emp: FuncionarioWithTreinamentos) => {
-    const url = buildShareableBadgeUrl(emp);
+    const url = `${window.location.origin}/card/${encodeURIComponent(emp.matricula || emp.id)}`;
     try {
       await navigator.clipboard.writeText(url);
       setCopiedId(emp.id);

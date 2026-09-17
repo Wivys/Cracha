@@ -5,7 +5,6 @@ import { CadastroPage } from './pages/CadastroPage';
 import { GaleriaCardsPage } from './pages/GaleriaCardsPage';
 import { MobileCardPage } from './pages/MobileCardPage';
 import { QrScannerModal } from './components/QrScannerModal';
-import { SupabaseSettingsModal } from './components/SupabaseSettingsModal';
 import { AdminUser, FuncionarioWithTreinamentos } from './types';
 import { dbService } from './lib/supabase';
 import { extractBadgeFromCurrentUrl } from './lib/portableBadge';
@@ -26,7 +25,6 @@ export default function App() {
 
   // Modals
   const [isQrScannerOpen, setIsQrScannerOpen] = useState(false);
-  const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
 
   // Refresh employees from Supabase / Local storage
   const loadEmployees = useCallback(async () => {
@@ -208,7 +206,6 @@ export default function App() {
             onAdminLoginSuccess={handleAdminLoginSuccess}
             onOpenEmployeeCard={navigateToCard}
             onOpenQrScanner={() => setIsQrScannerOpen(true)}
-            onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
           />
         )}
 
@@ -222,7 +219,6 @@ export default function App() {
             }}
             adminUser={adminUser}
             onLogout={handleLogout}
-            onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
             employees={employees}
           >
             <CadastroPage
@@ -244,7 +240,6 @@ export default function App() {
             }}
             adminUser={adminUser}
             onLogout={handleLogout}
-            onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
             employees={employees}
           >
             <GaleriaCardsPage
@@ -274,17 +269,6 @@ export default function App() {
           onScanSuccess={(matricula) => {
             setIsQrScannerOpen(false);
             navigateToCard(matricula);
-          }}
-        />
-      )}
-
-      {/* Supabase Connection Setup Modal */}
-      {isSupabaseModalOpen && (
-        <SupabaseSettingsModal
-          isOpen={isSupabaseModalOpen}
-          onClose={() => setIsSupabaseModalOpen(false)}
-          onConnected={() => {
-            loadEmployees();
           }}
         />
       )}

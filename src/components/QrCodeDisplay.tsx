@@ -32,7 +32,7 @@ export const QrCodeDisplay: React.FC<QrCodeDisplayProps> = ({
 
     QRCode.toDataURL(value, {
       width: size * 2, // High DPI
-      margin: 1,
+      margin: 2, // Optimal quiet zone for rapid camera scan
       color: {
         dark: '#002B49', // VLI Navy Blue
         light: '#FFFFFF',

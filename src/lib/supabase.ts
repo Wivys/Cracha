@@ -10,17 +10,26 @@ import { extractBadgeFromCurrentUrl, decodeBadgeToken } from './portableBadge';
  * - Suporte a armazenamento local seguro e sincronização opcional com Supabase
  */
 
-// Configurações do Supabase via variáveis de ambiente ou configuração local
-const envSupabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-const envSupabaseAnonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+// Configurações da Nuvem (Supabase) via variáveis de ambiente ou conexão padrão
+const DEFAULT_CLOUD_URL = 'https://geaypypffqpmynfxdaul.supabase.co';
+const DEFAULT_CLOUD_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdlYXlweXBmZnFwbXluZnhkYXVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg5MTc5NDcsImV4cCI6MjEwNDQ5Mzk0N30.v9ztxM67zF4nAVdHsUip2NoCstjKq5dPi3HsXWsq8og';
+
+const envSupabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || DEFAULT_CLOUD_URL;
+const envSupabaseAnonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || DEFAULT_CLOUD_KEY;
 
 export const getSupabaseConfig = () => {
   const localUrl = localStorage.getItem('vli_supabase_url');
   const localKey = localStorage.getItem('vli_supabase_anon_key');
   return {
-    url: localUrl || envSupabaseUrl || '',
-    key: localKey || envSupabaseAnonKey || '',
+    url: localUrl || envSupabaseUrl || DEFAULT_CLOUD_URL,
+    key: localKey || envSupabaseAnonKey || DEFAULT_CLOUD_KEY,
   };
+};
+
+export const isCloudConnected = (): boolean => {
+  const client = getSupabase();
+  return Boolean(client);
 };
 
 export const setSupabaseConfig = (url: string, key: string) => {
@@ -555,56 +564,17 @@ export const dbService = {
 
   /**
    * Busca um colaborador por ID ou Matrícula
-   * - Suporta decodificação de token portátil compartilhado via link (?d=...)
    * - Consulta cache local do navegador
-   * - Consulta o servidor Vercel / Express via path e query params
-   * - Consulta Supabase (se configurado)
+   * - Consulta nuvem Supabase em tempo real (permite abrir crachá em qualquer celular)
+   * - Consulta servidor /api/colaboradores
+   * - Suporta decodificação de token portátil compartilhado via link (?d=...)
    */
   async getFuncionarioByIdOrMatricula(
     idOrMatricula: string
   ): Promise<FuncionarioWithTreinamentos | null> {
     const query = idOrMatricula.trim().toLowerCase();
 
-    // 0. Tenta extrair crachá portátil direto da URL ativa (?d= ou #d=)
-    const fromUrl = extractBadgeFromCurrentUrl();
-    if (fromUrl) {
-      const repaired = repairFuncionarioObject(fromUrl);
-      const current = loadLocalStore();
-      const exists = current.some(
-        (c) => c.id === repaired.id || String(c.matricula).toLowerCase() === String(repaired.matricula).toLowerCase()
-      );
-      if (!exists) {
-        saveLocalStore([repaired, ...current]);
-      }
-      // Notifica o servidor em segundo plano para persistir para consultas curtas futuras
-      try {
-        fetch('/api/colaboradores', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(repaired),
-        }).catch(() => {});
-      } catch {}
-
-      return repaired;
-    }
-
-    // Se o próprio parâmetro for um token longo
-    if (idOrMatricula.length > 50) {
-      const decoded = decodeBadgeToken(idOrMatricula);
-      if (decoded) {
-        const repaired = repairFuncionarioObject(decoded);
-        const current = loadLocalStore();
-        const exists = current.some(
-          (c) => c.id === repaired.id || String(c.matricula).toLowerCase() === String(repaired.matricula).toLowerCase()
-        );
-        if (!exists) {
-          saveLocalStore([repaired, ...current]);
-        }
-        return repaired;
-      }
-    }
-
-    // 1. Consulta rápida no armazenamento local do navegador
+    // 1. Consulta rápida no armazenamento local do dispositivo
     const localList = loadLocalStore();
     const foundLocal = localList.find((f) => {
       const matchId = (f.id || '').toLowerCase() === query;
@@ -619,31 +589,7 @@ export const dbService = {
       return repairFuncionarioObject(foundLocal);
     }
 
-    // 2. Consulta no servidor (/api/colaboradores via caminho e query param)
-    try {
-      let res = await fetch(`/api/colaboradores/${encodeURIComponent(query)}`);
-      if (!res.ok) {
-        res = await fetch(`/api/colaboradores?idOrMatricula=${encodeURIComponent(query)}`);
-      }
-      if (res.ok) {
-        const json = await res.json();
-        if (json.success && json.data) {
-          const repaired = repairFuncionarioObject(json.data);
-          const current = loadLocalStore();
-          const exists = current.some(
-            (c) => c.id === repaired.id || String(c.matricula).toLowerCase() === String(repaired.matricula).toLowerCase()
-          );
-          if (!exists) {
-            saveLocalStore([repaired, ...current]);
-          }
-          return repaired;
-        }
-      }
-    } catch {
-      // Ignora falhas de rede e segue para as opções seguintes
-    }
-
-    // 3. Consulta no Supabase se configurado
+    // 2. Consulta em Nuvem (Supabase) - Permite que qualquer celular com o link curto acesse o crachá
     const supabase = getSupabase();
     if (supabase) {
       try {
@@ -677,7 +623,60 @@ export const dbService = {
           return repaired;
         }
       } catch (err) {
-        console.warn('Aviso: Utilizando busca local de colaborador:', err);
+        console.warn('Aviso: Consulta remota na nuvem:', err);
+      }
+    }
+
+    // 3. Consulta no servidor (/api/colaboradores via caminho e query param)
+    try {
+      let res = await fetch(`/api/colaboradores/${encodeURIComponent(query)}`);
+      if (!res.ok) {
+        res = await fetch(`/api/colaboradores?idOrMatricula=${encodeURIComponent(query)}`);
+      }
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          const repaired = repairFuncionarioObject(json.data);
+          const current = loadLocalStore();
+          const exists = current.some(
+            (c) => c.id === repaired.id || String(c.matricula).toLowerCase() === String(repaired.matricula).toLowerCase()
+          );
+          if (!exists) {
+            saveLocalStore([repaired, ...current]);
+          }
+          return repaired;
+        }
+      }
+    } catch {
+      // Ignora falhas de rede e segue para as opções seguintes
+    }
+
+    // 4. Fallback portátil: Tenta extrair dados se houver ?d= na URL ou se o parâmetro for token
+    const fromUrl = extractBadgeFromCurrentUrl();
+    if (fromUrl) {
+      const repaired = repairFuncionarioObject(fromUrl);
+      const current = loadLocalStore();
+      const exists = current.some(
+        (c) => c.id === repaired.id || String(c.matricula).toLowerCase() === String(repaired.matricula).toLowerCase()
+      );
+      if (!exists) {
+        saveLocalStore([repaired, ...current]);
+      }
+      return repaired;
+    }
+
+    if (idOrMatricula.length > 50) {
+      const decoded = decodeBadgeToken(idOrMatricula);
+      if (decoded) {
+        const repaired = repairFuncionarioObject(decoded);
+        const current = loadLocalStore();
+        const exists = current.some(
+          (c) => c.id === repaired.id || String(c.matricula).toLowerCase() === String(repaired.matricula).toLowerCase()
+        );
+        if (!exists) {
+          saveLocalStore([repaired, ...current]);
+        }
+        return repaired;
       }
     }
 

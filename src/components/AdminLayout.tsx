@@ -13,6 +13,8 @@ import {
   Clock,
   Check,
   X,
+  Cloud,
+  CloudOff,
 } from 'lucide-react';
 import { AdminUser, FuncionarioWithTreinamentos } from '../types';
 import { getSupabase } from '../lib/supabase';
@@ -22,7 +24,7 @@ interface AdminLayoutProps {
   onSelectTab: (tab: 'galeria' | 'cadastro') => void;
   adminUser: AdminUser | null;
   onLogout: () => void;
-  onOpenSupabaseModal: () => void;
+  onOpenSupabaseModal?: () => void;
   employees?: FuncionarioWithTreinamentos[];
   children: React.ReactNode;
 }
@@ -125,8 +127,33 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
           </span>
         </div>
 
-        {/* Right: Notification Bell & User Circle */}
+        {/* Right: Cloud Status, Notification Bell & User Circle */}
         <div className="flex items-center gap-3">
+          {/* Indicador de Conexão com a Nuvem (Apenas status conectado/não) */}
+          <div className="flex items-center">
+            {isSupabaseConnected ? (
+              <div
+                id="cloud-badge-header"
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 rounded-full text-[11px] font-bold shadow-2xs"
+                title="Sincronização em nuvem ativa em tempo real"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden sm:inline">Nuvem Conectada</span>
+              </div>
+            ) : (
+              <div
+                id="cloud-badge-header"
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-white/10 text-slate-300 border border-white/20 rounded-full text-[11px] font-medium"
+                title="Armazenamento local ativo neste dispositivo"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+                <CloudOff className="w-3.5 h-3.5 text-slate-400" />
+                <span className="hidden sm:inline">Modo Local</span>
+              </div>
+            )}
+          </div>
+
           {/* Notification Bell Funcional */}
           <div className="relative">
             <button
@@ -250,14 +277,14 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
                     </div>
                   )}
 
-                  {/* 4. Status de Armazenamento e Banco de Dados */}
+                  {/* 4. Status de Armazenamento e Nuvem */}
                   <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-slate-700 flex items-start gap-2">
                     {isSupabaseConnected ? (
                       <>
-                        <Database className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                        <Cloud className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                         <div className="flex-1">
                           <div className="font-bold text-xs text-slate-900">
-                            Supabase Conectado
+                            Nuvem Conectada
                           </div>
                           <p className="text-[11px] text-slate-500">
                             Sincronização em nuvem ativa em tempo real.
@@ -266,13 +293,13 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
                       </>
                     ) : (
                       <>
-                        <CheckCircle2 className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                        <CloudOff className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
                         <div className="flex-1">
                           <div className="font-bold text-xs text-slate-900">
-                            Persistência Local &amp; Servidor
+                            Armazenamento Local
                           </div>
                           <p className="text-[11px] text-slate-500">
-                            {employees.length} colaborador(es) cadastrado(s) com dados preservados.
+                            {employees.length} colaborador(es) cadastrado(s) neste dispositivo.
                           </p>
                         </div>
                       </>
@@ -282,13 +309,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
 
                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
                   <span>Atualizado agora</span>
-                  <button
-                    type="button"
-                    onClick={onOpenSupabaseModal}
-                    className="text-[#002B49] font-bold hover:underline cursor-pointer"
-                  >
-                    Status do Banco &rarr;
-                  </button>
+                  <span className="font-medium text-slate-500">Sistema VLI</span>
                 </div>
               </div>
             )}

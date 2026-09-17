@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { VliLogo } from '../components/VliLogo';
-import { Lock, QrCode, ArrowRight, ShieldCheck, UserCheck, KeyRound, Upload } from 'lucide-react';
-import { dbService } from '../lib/supabase';
+import { Lock, QrCode, ArrowRight, ShieldCheck, UserCheck, KeyRound, Upload, Cloud, CloudOff } from 'lucide-react';
+import { dbService, isCloudConnected } from '../lib/supabase';
 import { AdminUser } from '../types';
 
 interface LoginPageProps {
   onAdminLoginSuccess: (user: AdminUser) => void;
   onOpenEmployeeCard: (matriculaOrId: string) => void;
   onOpenQrScanner: () => void;
-  onOpenSupabaseModal: () => void;
+  onOpenSupabaseModal?: () => void;
 }
 
 /**
@@ -127,15 +127,29 @@ export const LoginPage: React.FC<LoginPageProps> = ({
       />
       <div className="absolute inset-0 bg-gradient-to-b from-white/70 via-slate-100/90 to-slate-200/90 pointer-events-none" />
 
-      {/* Botão sutil superior para configuração do Supabase */}
-      <div className="relative z-20 flex justify-end max-w-md mx-auto w-full">
-        <button
-          type="button"
-          onClick={onOpenSupabaseModal}
-          className="text-[11px] font-semibold text-slate-500 hover:text-[#002B49] transition-colors cursor-pointer"
-        >
-          Banco de Dados / Supabase
-        </button>
+      {/* Indicador sutil de Conexão com a Nuvem */}
+      <div className="relative z-20 flex justify-end max-w-md mx-auto w-full px-2">
+        {isCloudConnected() ? (
+          <div
+            id="status-nuvem-login"
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-bold shadow-2xs"
+            title="Conectado à nuvem. Sincronização em tempo real ativa."
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <Cloud className="w-3.5 h-3.5 text-emerald-600" />
+            <span>Nuvem Conectada</span>
+          </div>
+        ) : (
+          <div
+            id="status-nuvem-login"
+            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 border border-slate-200 text-slate-600 text-[11px] font-medium shadow-2xs"
+            title="Armazenamento local ativo neste navegador."
+          >
+            <span className="w-2 h-2 rounded-full bg-slate-400" />
+            <CloudOff className="w-3.5 h-3.5 text-slate-500" />
+            <span>Nuvem Desconectada (Modo Local)</span>
+          </div>
+        )}
       </div>
 
       {/* Container Principal */}

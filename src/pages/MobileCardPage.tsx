@@ -253,16 +253,11 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
         <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-4 max-w-md w-full mb-6 text-left shadow-lg">
           <p className="text-amber-400 text-xs font-bold uppercase tracking-wider mb-2 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            Como acessar o crachá em outro aparelho:
+            Consulta de Crachá Digital VLI
           </p>
-          <ul className="text-slate-300 text-xs space-y-1.5 list-disc pl-4 leading-relaxed">
-            <li>
-              No aparelho ou computador onde o crachá foi cadastrado, abra a Galeria e clique no ícone de <strong>Globo (Copiar Link)</strong> ou abra o crachá e clique em <strong>Compartilhar</strong>.
-            </li>
-            <li>
-              O link gerado pelo botão <strong>Compartilhar</strong> transporta automaticamente todos os cursos e dados do colaborador para abrir em qualquer celular, sem necessidade de login.
-            </li>
-          </ul>
+          <p className="text-slate-300 text-xs leading-relaxed">
+            Verifique se a matrícula informada está correta e se o aparelho está conectado à internet para sincronização com a nuvem.
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center justify-center gap-3">
@@ -289,7 +284,7 @@ export const MobileCardPage: React.FC<MobileCardPageProps> = ({
 
   const cleanNameSlug = employee.nome.replace(/\s+/g, '').toUpperCase();
   const directTokenUrl = `http://autenticar.vli.com.br/token/${cleanNameSlug}`;
-  const actualPublicUrl = buildShareableBadgeUrl(employee);
+  const actualPublicUrl = `${window.location.origin}/card/${encodeURIComponent(employee.matricula || employee.id)}`;
 
   // Separação dos cursos
   const cursosManuais = employee.treinamentos.filter((t) => t.origem !== 'universidade_vli');
